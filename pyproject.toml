@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "needle-sbi"
 version = "0.1.1"
-description = "Workflow manager for NSBI tools"
+description = "Workflow manager for NSBI tools in HEP"
 authors = [
     {name = "Kylian Schmidt", email = "kylian.schmidt@kit.edu"},
     {name = "Stephen Jiggins"},
@@ -15,6 +15,17 @@ authors = [
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["sbi", "nsbi", "simulation-based inference", "machine learning", "high energy physics", "workflow", "luigi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 dependencies = [
     # data / HEP
     "awkward>=2.7",
@@ -23,8 +34,8 @@ dependencies = [
     "pyarrow>=19.0",
     "uproot>=5.6",
     # ml related packages
-    "torch (>=2.7,<2.11)",
-    "lightning==2.5.6",
+    "torch >=2.7,<2.11",
+    "lightning>=2.5.6",
     "zuko>=1.3",
     # configuration and workflow related packages
     "hydra-core>=1.3.2",
@@ -46,6 +57,11 @@ dependencies = [
     "seaborn>=0.13.2",
     "mplhep>=0.4.1",
 ]
+
+[project.urls]
+Homepage = "https://needle-sbi.github.io/"
+Documentation = "https://needle-sbi.readthedocs.io/en/latest/"
+Repository = "https://github.com/needle-sbi/needle-sbi"
 
 [dependency-groups]
 dev = [
