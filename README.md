@@ -68,8 +68,8 @@ This will copy:
 source setup.sh
 ```
 
-**Note**: Every time you start a new shell you have to run steps 3.1 and 3.2, e.g. source your virtual environment and the `setup.sh`
-script.
+**Note**: Every time you start a new shell you have to source your virtual environment and the `setup.sh`
+script (Steps 3.1 and 3.3).
 
 ### FAIR Universe Demo (Optional)
 
