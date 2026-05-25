@@ -1,15 +1,12 @@
 # NEEDLE – The Workflow Orchestrator for Neural Simulation Based Inference Methods
 
-![pipeline](https://gitlab.desy.de/needle/orchestrator/badges/dev/pipeline.svg)
-![coverage](https://gitlab.desy.de/needle/orchestrator/badges/dev/coverage.svg)
+**Docs**: https://needle-sbi.readthedocs.io/en/latest/
 
-## Overview
-
-NEEDLE is a framework for the management and training on NSBI tools. It implements most functionalities
-needed to train a pool of ML models in a typical HPE analysis environment, meaning deployment to batch
+NEEDLE is a framework for the management and training of NSBI tools. It implements most functionalities
+needed to train a pool of ML models in a typical HEP analysis environment, meaning deployment to batch
 systems (htcondor or slurm), config management and efficient dataloading.
 
-## Getting started
+## Installation
 
 ### Step 1: Astral uv
 
@@ -72,7 +69,7 @@ source setup.sh
 ```
 
 **Note**: Every time you start a new shell you have to source your virtual environment and the `setup.sh`
-script.
+script (Steps 3.1 and 3.3).
 
 ### FAIR Universe Demo (Optional)
 
