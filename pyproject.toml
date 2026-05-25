@@ -47,7 +47,6 @@ dependencies = [
     "ipykernel>=6.29.5",
     "ipython>=9.0.2",
     "fair-universe-demo",
-    "gallery",
 ]
 
 [dependency-groups]
@@ -88,7 +87,6 @@ members = ["examples/fair_universe_demo"]
 
 [tool.uv.sources]
 fair-universe-demo = {editable = true, workspace = true }
-gallery = { git = "https://gitlab.etp.kit.edu/kschmidt/web.git" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

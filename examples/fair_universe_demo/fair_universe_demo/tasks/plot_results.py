@@ -170,5 +170,3 @@ class PlottingTask(PlottingMixin):
             ingestion_result_dict=self.ingestion_results,
             ground_truth_mu=self.test_settings["ground_truth_mus"],
         )
-
-        self.upload_plots_to_webpage(os.getenv("NEEDLE_WEB_DIR"))
