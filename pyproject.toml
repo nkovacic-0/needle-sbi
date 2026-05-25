@@ -46,7 +46,6 @@ dependencies = [
     "seaborn>=0.13.2",
     "ipykernel>=6.29.5",
     "ipython>=9.0.2",
-    "fair-universe-demo",
 ]
 
 [dependency-groups]
@@ -84,9 +83,6 @@ packages = ["needle"]
 
 [tool.uv.workspace]
 members = ["examples/fair_universe_demo"]
-
-[tool.uv.sources]
-fair-universe-demo = {editable = true, workspace = true }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
