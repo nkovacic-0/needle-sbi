@@ -12,6 +12,7 @@ authors = [
     {name = "Levi Evans"},
     {name = "Nino Kovacic"},
 ]
+license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
