@@ -1,0 +1,25 @@
+{
+    "systematics": {
+        "tes": false,
+        "jes": false,
+        "soft_met": false,
+        "ttbar_scale": false,
+        "diboson_scale": false,
+        "bkg_scale": false
+    },
+    "num_pseudo_experiments": 20,
+    "num_of_sets": 10,
+    "ground_truth_mus": [
+        0.1,
+        0.42222222222222217,
+        0.7444444444444444,
+        1.0666666666666667,
+        1.3888888888888888,
+        1.711111111111111,
+        2.033333333333333,
+        2.3555555555555556,
+        2.6777777777777776,
+        3.0
+    ],
+    "random_mu": false
+}

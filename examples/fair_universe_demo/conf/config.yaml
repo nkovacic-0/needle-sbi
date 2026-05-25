@@ -1,0 +1,150 @@
+custom_settings:
+  use_test_data: true
+  root_dir: ${if:${custom_settings.use_test_data}, "examples/fair_universe_demo/test_data", "${oc.env:FAIR_UNIVERSE_DATA,""}"}
+  nominal: true
+  test_settings_json: ${if:${custom_settings.nominal}, "test_settings_nominal.json", "test_settings.json"}
+
+results_path: ${if:${custom_settings.use_test_data}, "runs/fair_universe_demo_test", "runs/fair_universe_demo_fixed_normalization"}
+results_path_downstream: "${results_path}/stat_only_histogram_mu_one"
+
+estimators:
+  nf_signal_1jet:
+    model: cnf
+    model_override:
+      num_jets: 1
+    datamodule: cnf
+    datamodule_override:
+      num_jets: 1
+      train_on_signal: true
+    trainer: cnf
+    expands:
+      systematics:
+        c_0.5:
+          model_override:
+            c: 0.5
+        c_2.0:
+          model_override:
+            c: 2.0
+  nf_signal_2jet:
+    model: cnf
+    model_override:
+      num_jets: 2
+    datamodule: cnf
+    datamodule_override:
+      num_jets: 2
+      train_on_signal: true
+    trainer: cnf
+    expands:
+      systematics:
+        c_0.5:
+          model_override:
+            c: 0.5
+        c_2.0:
+          model_override:
+            c: 2.0
+  nf_background_1jet:
+    model: cnf
+    model_override:
+      num_jets: 1
+    datamodule: cnf
+    datamodule_override:
+      num_jets: 1
+      train_on_signal: false
+    trainer: cnf
+    expands:
+      systematics:
+        c_0.5:
+          model_override:
+            c: 0.5
+        c_2.0:
+          model_override:
+            c: 2.0
+  nf_background_2jet:
+    model: cnf
+    model_override:
+      num_jets: 2
+    datamodule: cnf
+    datamodule_override:
+      num_jets: 2
+      train_on_signal: false
+    trainer: cnf
+    expands:
+      systematics:
+        c_0.5:
+          model_override:
+            c: 0.5
+        c_2.0:
+          model_override:
+            c: 2.0
+  classifier:
+    requires:
+      - nf_background_1jet
+      - nf_background_2jet
+      - nf_signal_1jet
+      - nf_signal_2jet
+    model: classifier
+    datamodule: classifier
+    trainer: classifier
+
+downstream_tasks:
+  validation_nf:
+    args:
+      _target_: examples.fair_universe_demo.fair_universe_demo.tasks.plot_nf.NormalizingFlowValidationTask
+      root_dir: ${custom_settings.root_dir}
+      plot_save_dir: "${results_path_downstream}/plots"
+    expands:
+      model_name: [
+        "nf_signal_1jet&c_0p5",
+        "nf_background_1jet&c_0p5",
+        "nf_signal_1jet&c_2p0",
+        "nf_background_1jet&c_2p0",
+        "nf_signal_2jet&c_0p5",
+        "nf_background_2jet&c_0p5",
+        "nf_signal_2jet&c_2p0",
+        "nf_background_2jet&c_2p0",
+      ]
+  validation_classifier:
+    args:
+      _target_: examples.fair_universe_demo.fair_universe_demo.tasks.plot_classifier.ClassifierValidationTask
+      root_dir: ${custom_settings.root_dir}
+      plot_save_dir: "${results_path_downstream}/plots/classifier"
+    expands:
+      num_jets: [1, 2]
+  histogram:
+    args:
+      _target_: examples.fair_universe_demo.fair_universe_demo.tasks.histogram.HistogramTask
+      root_dir: ${custom_settings.root_dir}
+      json_save_path: "${results_path_downstream}/hist.json"
+  neyman:
+    requires: ["histogram"]
+    args:
+      _target_: examples.fair_universe_demo.fair_universe_demo.tasks.neyman.NeymanTask
+      hist_path: "${results_path_downstream}/hist.json"
+      output_path: "${results_path_downstream}/neyman.json"
+      root_dir: "${custom_settings.root_dir}"
+      plot_save_dir: "${results_path_downstream}/plots/neyman_validation"
+  eval:
+    requires: ["neyman"]
+    args:
+      _target_: examples.fair_universe_demo.fair_universe_demo.tasks.eval.EvalTask
+      hist_path: "${results_path_downstream}/hist.json"
+      root_dir: "${custom_settings.root_dir}"
+      neyman_path: "${results_path_downstream}/neyman.json"
+      test_settings_path: "examples/fair_universe_demo/conf/${custom_settings.test_settings_json}"
+      output_path: "${results_path_downstream}/eval.json"
+  score:
+    requires: ["eval"]
+    args:
+      _target_: examples.fair_universe_demo.fair_universe_demo.tasks.score.ScoreTask
+      predict_path: "${results_path_downstream}/eval.json"
+      output_dir: "${results_path_downstream}/scores/"
+      test_settings_path: "examples/fair_universe_demo/conf/${custom_settings.test_settings_json}"
+  plot:
+    requires: ["score", "validation_nf", "validation_classifier"]
+    args:
+      _target_: examples.fair_universe_demo.fair_universe_demo.tasks.plot_results.PlottingTask
+      root_dir: "${custom_settings.root_dir}"
+      cached_test_settings_file: "${results_path_downstream}/${custom_settings.test_settings_json}"
+      ingestion_results_path: "${results_path_downstream}/eval.json"
+      score_path: "${results_path_downstream}/scores/"
+      plot_save_dir: "${results_path_downstream}/plots"
