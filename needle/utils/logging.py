@@ -102,7 +102,7 @@ def timing(func):
         start = time.perf_counter()
         result = func(*args, **kwargs)
         end = time.perf_counter()
-        logger.debug(f"Function '{func.__module__}.{func.__name__}' took {end - start:.4f} seconds")
+        print(f"Function '{func.__module__}.{func.__name__}' took {end - start:.4f} seconds")
         return result
 
     return wrapper
