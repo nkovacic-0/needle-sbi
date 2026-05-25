@@ -1,7 +1,7 @@
-"""LAW Tasks - Distributed training orchestration for NEEDLE.
+"""law_tasks: Distributed training orchestration for NEEDLE.
 
 This package defines the complete task DAG for training ensemble models with
-systematic variations and cross-validation folds using the LAW (Luigi + Apache Airflow Wrapper)
+systematic variations and cross-validation folds using law.
 workflow engine.
 
 Task Hierarchy:
@@ -26,7 +26,7 @@ Features:
 
 Usage:
     law run MainTask --config-file path/to/config.yaml
-    law run DownstreamTask --downstream my_analysis_task
+    law run DownstreamTask --downstream my_analysis_task --config-file path/to/config.yaml
 
 See documentation for detailed configuration and usage examples.
 """
