@@ -12,7 +12,7 @@ authors = [
     {name = "Levi Evans"},
     {name = "Nino Kovacic"},
 ]
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 readme = "README.md"
 requires-python = ">=3.12"
 keywords = ["sbi", "nsbi", "simulation-based inference", "machine learning", "high energy physics", "workflow", "luigi"]
