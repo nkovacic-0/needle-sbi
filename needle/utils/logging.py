@@ -93,10 +93,7 @@ class LogOnce:
 
 
 def timing(func):
-    """
-    Decorator to time a function's execution. Uses the 'ml' logger to print.
-    """
-
+    """Decorator to time a function's execution"""
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start = time.perf_counter()
