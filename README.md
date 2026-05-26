@@ -8,12 +8,17 @@ systems (htcondor or slurm), config management and efficient dataloading.
 
 ## Installation
 
-### Step 1: Astral uv
+### Option 1: Plain pip
 
-The project uses [uv](https://docs.astral.sh/uv/) for dependency management. You can also use plain `pip`
-if you prefer by replacing the `uv` commands with the corresponding `pip` versions.
+Create or use an existing virtual environment with `python3 -m venv`. Install the `needle` package with
 
-Install `uv` with
+```bash
+pip install "git+ssh://git@github.com/needle-sbi/needle-sbi.git"
+```
+
+### Option 2: Astral uv
+
+The project uses [uv](https://docs.astral.sh/uv/) for dependency management. Install `uv` with
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -22,61 +27,61 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 Reload your shell or source the uv environment to make it active in your current shell, as stated by
 uv when you run the script.
 
-### Step 2: Install from Github
-
- - Option A: Download the `needle` package with `uv` (no source code)
+ - Option 2.A: Download the `needle` package with `uv` (no source code)
 
     ```bash
     uv pip install --no-config "git+ssh://git@github.com/needle-sbi/needle-sbi.git"
     ```
 
- - Option B: Cloning the whole repo (for devs, adds the source code)
+ - Option 2.B: Cloning the whole repo (for devs, adds the source code)
 
     ```bash
     git clone git@github.com:needle-sbi/needle-sbi.git
-    uv python pin 3.12   # Use recommended python version (higher is also usually okay)
+    uv python pin 3.12   # Use recommended python version
     uv sync              # install runtime dependencies
     ```
 
-### Step 3
+### Set up the NEEDLE environment
 
-3.1 Source your newly built python environment with
+1. Source your newly built python environment with
 
-```bash
-source .venv/bin/activate
-```
+    ```bash
+    source .venv/bin/activate
+    ```
 
-This will unlock the `needle` cli tool that installs the files you need to make your project
-work within NEEDLE.
+    This will unlock the `needle` cli tool that installs the files you need to make your project
+    work within NEEDLE.
 
-3.2 Initialize your project with
+2. Initialize your project with
 
-```bash
-needle init
-```
+    ```bash
+    needle init
+    ```
 
-This will copy:
+    This will copy:
 
- - `law.cfg`: law/luigi config file for batch submissions
- - `index`: law index file that lists all the available tasks. Can be updated using `law index`
- - `setup.sh`: script for activating the NEEDLE environment
- - `conf/`: template directory for your config files according to the hydra schema
+    - `law.cfg`: law/luigi config file for batch submissions
+    - `index`: law index file that lists all the available tasks. Can be updated using `law index`
+    - `setup.sh`: script for activating the NEEDLE environment
+    - `conf/`: template directory for your config files according to the hydra schema
 
-3.3 Source the `setup.sh` script
+3. Source the `setup.sh` script
 
-```bash
-source setup.sh
-```
+    ```bash
+    source setup.sh
+    ```
 
 **Note**: Every time you start a new shell you have to source your virtual environment and the `setup.sh`
-script (Steps 3.1 and 3.3).
+script (Steps 1 and 3).
 
 ### FAIR Universe Demo (Optional)
+
+This example requires a `git clone` to be included.
 
 We provide an example of how to implement a full NSBI pipeline within needle. For this, we use the
 FAIR Universe dataset. If you dont want to use the full dataset (a few GB), there is a test dataset
 (1000 events) already shipped with at `examples/fair_universe_demo/test_data/`. The full dataset can
-be obtained from codabench
+be obtained from codabench via
 
 ```bash
 cd /path/to/desired/directory  # can be in the same repo
@@ -85,7 +90,8 @@ unzip public_data.zip
 export FAIR_UNIVERSE_DATA="</path/to/desired/directory>/input_data/train/data/data.parquet
 ```
 
-It is recommended to add the `$FAIR_UNIVERSE_DATA` environment variable to your `~/.bashrc` (or equivalent) to have a persistent setup each time you reload your shell.
+It is recommended to add the `$FAIR_UNIVERSE_DATA` environment variable to your `~/.bashrc` (or equivalent) 
+to have a persistent setup each time you reload your shell.
 
 ## Running LAW tasks
 
@@ -94,7 +100,8 @@ The three top-level Tasks you can use are
  - `SnapshotTask` (gather checkpoints in tree structure)
  - `DownstreamTask` (your hook for running custom luigi Tasks).
 
-> **Note:** if running on ARM Arch Macbook you need to set `--workers 1` to avoid Luigi spawn/pickling issues with patched worker callbacks.
+> **Note:** if running on ARM Arch Macbook you need to set `--workers 1` to avoid Luigi spawn/pickling 
+issues with patched worker callbacks.
 
 ### 1. Training: MainTask
 
@@ -167,7 +174,7 @@ Pre-built container definitions are in `containerization/`:
 ```bash
 singularity build needle-base.sif containerization/singularity_base.def
 singularity build needle.sif containerization/singularity_dev.def
-singularity run needle.sif pytest ml/tests
+singularity run needle.sif <command>
 ```
 
 When using `singularity exec` or `singularity shell`, you still need to `source setup.sh` and `law index` manually.
@@ -175,17 +182,32 @@ When using `singularity exec` or `singularity shell`, you still need to `source 
 ## Project structure
 
 The current structure is as follows:
+
 ```
 needle-sbi/
 ├ containerization/      # singularity container definitions
-├ examples/              # Examples with finished models, configs and more
+├ docs                   # documentation
+├ examples/              # examples with finished models, configs and more
 │  └ fair_universe_demo  # FAIR Universe Example code, config and test data
 ├ needle/                # source code
-├ tests/
-├ pyproject.toml
+|  ├ api                 # (WIP) python API
+|  ├ etl                 # data ingestion with dask
+|  ├ evaluation          # (WIP) unified evaluation
+|  ├ law_tasks           # DAG Workflow definition
+|  ├ ml                  # dataloading and model library
+|  ├ tui                 # Terminal UI (only for CLI)
+|  ├ templates           # files to copy to $CWD when running `needle init`
+|  └ utils               # further utilities
+└ tests/                 # pytest
+```
+
+After `needle init`:
+
+```
 ├ conf/config.yaml       # HYDRA config (can also be located elsewhere)
-├ setup.sh
-└ law.cfg                # LAW config (distinct from needle config.yaml)
+├ index                  # Law Tasks listed with available args (reload with `law index`)
+├ setup.sh               # Set up the NEEDLE working environment
+└ law.cfg                # Law config (distinct from needle `conf/config.yaml`)
 ```
 
 ## Disclaimer on the use of Artificial Intelligence

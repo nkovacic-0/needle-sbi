@@ -420,5 +420,3 @@ class NormalizingFlowValidationTask(PlottingMixin):
             bg_data,
             num_features=4,
         )
-
-        self.upload_plots_to_webpage(os.getenv("NEEDLE_WEB_DIR"))
