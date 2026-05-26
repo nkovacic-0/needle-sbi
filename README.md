@@ -182,6 +182,7 @@ When using `singularity exec` or `singularity shell`, you still need to `source 
 ## Project structure
 
 The current structure is as follows:
+
 ```
 needle-sbi/
 ├ containerization/      # singularity container definitions
@@ -201,6 +202,8 @@ needle-sbi/
 ```
 
 After `needle init`:
+
+```
 ├ conf/config.yaml       # HYDRA config (can also be located elsewhere)
 ├ index                  # Law Tasks listed with available args (reload with `law index`)
 ├ setup.sh               # Set up the NEEDLE working environment
