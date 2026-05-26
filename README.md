@@ -73,10 +73,12 @@ script (Steps 3.1 and 3.3).
 
 ### FAIR Universe Demo (Optional)
 
+This example requires a `git clone` to be included.
+
 We provide an example of how to implement a full NSBI pipeline within needle. For this, we use the
 FAIR Universe dataset. If you dont want to use the full dataset (a few GB), there is a test dataset
 (1000 events) already shipped with at `examples/fair_universe_demo/test_data/`. The full dataset can
-be obtained from codabench
+be obtained from codabench via
 
 ```bash
 cd /path/to/desired/directory  # can be in the same repo
@@ -167,7 +169,7 @@ Pre-built container definitions are in `containerization/`:
 ```bash
 singularity build needle-base.sif containerization/singularity_base.def
 singularity build needle.sif containerization/singularity_dev.def
-singularity run needle.sif pytest ml/tests
+singularity run needle.sif <command>
 ```
 
 When using `singularity exec` or `singularity shell`, you still need to `source setup.sh` and `law index` manually.
@@ -178,14 +180,26 @@ The current structure is as follows:
 ```
 needle-sbi/
 ├ containerization/      # singularity container definitions
-├ examples/              # Examples with finished models, configs and more
+├ docs                   # documentation
+├ examples/              # examples with finished models, configs and more
 │  └ fair_universe_demo  # FAIR Universe Example code, config and test data
 ├ needle/                # source code
-├ tests/
-├ pyproject.toml
+|  ├ api                 # (WIP) python API
+|  ├ etl                 # data ingestion with dask
+|  ├ evaluation          # (WIP) unified evaluation
+|  ├ law_tasks           # DAG Workflow definition
+|  ├ ml                  # dataloading and model library
+|  ├ tui                 # Terminal UI (only for CLI)
+|  ├ templates           # files to copy to $CWD when running `needle init`
+|  └ utils               # further utilities
+└ tests/                 # pytest
+```
+
+After `needle init`:
 ├ conf/config.yaml       # HYDRA config (can also be located elsewhere)
-├ setup.sh
-└ law.cfg                # LAW config (distinct from needle config.yaml)
+├ index                  # Law Tasks listed with available args (reload with `law index`)
+├ setup.sh               # Set up the NEEDLE working environment
+└ law.cfg                # Law config (distinct from needle `conf/config.yaml`)
 ```
 
 ## Disclaimer on the use of Artificial Intelligence
