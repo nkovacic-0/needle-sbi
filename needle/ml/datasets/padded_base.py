@@ -8,6 +8,7 @@ padding.
 
 import logging
 import warnings
+from typing import Literal
 from abc import ABC, abstractmethod
 
 import awkward as ak
@@ -21,7 +22,6 @@ from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("ml")
 
-
 class PaddedDatasetBase(Dataset, ABC):
     """
     Base class for Datasets handling ragged data from dask_awkward Record arrays.
@@ -33,105 +33,92 @@ class PaddedDatasetBase(Dataset, ABC):
     features_ingestor: Ingestor
     labels_ingestor: Ingestor
     weights_ingestor: Ingestor
-   
 
     @abstractmethod
     def __init__(self, *args, **kwargs):
-        pass
+        self._compute_padding_lengths(self.feature_names)
 
-    def convert_ak_to_tensor(self, array: ak.Array, fields: list[str]) -> torch.Tensor:
-        """Compute the tensors from an awkward array.
+    def convert_ragged_to_tensor(self, array: ak.Array, fields: list[str], ingestor: Ingestor) -> torch.Tensor:
+        # TODO - check that the docstring explains what is going on (I'm continuosly making code updates, but not docstring updates)
+        """For per-particle (jagged) fields. Pads axis=1 to the precomputed global
+        max length. Shape: (E, P, F).
 
-        This means that any delayed objects such as dask_awkward arrays must be computed before
-        calling this method.
-
-        Args:
-            array: ak.Array: Awkward Array containing the data.
-            fields: list[str]: List of field names to extract from the array.
-
-        Returns:
-            torch.Tensor: Tensor of shape (E, P, F) where
-                E is the number of events,
-                P is the number of particles (padded),
-                F is the number of features.
+        Note:
+            `array` must already be computed (eager), e.g. via `partition.compute()`.
+            Padding target comes from `get_padding_length`, which reflects the max
+            over the *entire* dataset, not just this partition/chunk.
         """
         event_list = []
+        for field in fields:
+            column = NestedArrayIndexer.get_nested_field(array, field, ingestor.SEPARATOR)
+            column = self.add_innermost_dimension(column)
+            padded = ak.pad_none(column, axis=1, target=self.get_padding_length(field), clip=True)
+            event_list.append(padded[..., np.newaxis])
+        events = ak.concatenate(event_list, axis=-1)
+        return torch.tensor(ak.to_numpy(events), dtype=torch.float32)
+
+    def convert_flat_to_tensor(
+        self, array: ak.Array, fields: list[str], ingestor: Ingestor, 
+        reduce: Literal["stack", "product", "sum"] = "stack",
+    ) -> torch.Tensor:
+        # TODO - needs its doctring checked, updated!
+        """For per-event (regular, non-ragged) fields like labels/weights.
+
+        Returns shape (E,) for a single field or a reduced ("product"/"sum") combination
+        of multiple fields; shape (E, F) for "stack" with F > 1 fields.
+        """
+        columns = [
+            ak.to_numpy(NestedArrayIndexer.get_nested_field(array, f, ingestor.SEPARATOR))
+            for f in fields
+        ]
+        if len(columns) == 1:
+            combined = columns[0]
+        elif reduce == "stack":
+            combined = np.stack(columns, axis=-1)
+        elif reduce == "product":
+            combined = np.prod(np.stack(columns, axis=-1), axis=-1)
+        elif reduce == "sum":
+            combined = np.sum(np.stack(columns, axis=-1), axis=-1)
+        else:
+            raise ValueError(f"Unknown reduce mode: {reduce}")
+        return torch.tensor(combined, dtype=torch.float32)
+
+    def _compute_padding_lengths(self, fields: list[str]) -> None:
+    # TODO - is this actually sane? i.e. I didn't see NEEDLE pre-computng the 
+    # padding scheme, but that is very much surprising, can it be that I missed it???
+    """Precompute and cache the global padding length for each ragged field.
+
+    Important:
+        Must be called once, in `__init__`, using the full un-computed
+        dask_awkward array (`self.features_ingestor.array`) — not a
+        partition-level slice. Because the result is cached per field and
+        reused across every partition and every worker, computing it from
+        a single partition would silently apply the wrong padding length
+        to all other partitions (risking truncation of real particles via
+        `clip=True`), and independently-computed values across torch
+        DataLoader workers could disagree entirely, producing inconsistent
+        tensor shapes across a batch.
+    """
+        if not hasattr(self, "_padding_lengths"):
+            self._padding_lengths = {}
 
         for field in fields:
-            column = NestedArrayIndexer.get_nested_field(array, field, self.features_ingestor.SEPARATOR)
-            column = self.add_innermost_dimension(column)
-            padded = ak.pad_none(
-                column,
-                axis=1,
-                target=self.get_padding_length(column),
-                clip=True,
+            if field in self._padding_lengths:
+                continue
+
+            column = NestedArrayIndexer.get_nested_field(
+                self.features_ingestor.array, field, self.features_ingestor.SEPARATOR
             )
-            padded = padded[..., np.newaxis]
-            event_list.append(padded)
-
-        events = ak.concatenate(event_list, axis=-1)
-        events = torch.tensor(ak.to_numpy(events), dtype=torch.float32)
-        return events
-
-    def __len__(self) -> int:
-        return self.features_ingestor.length
-
-    def get_padding_length(self, array: ak.Array) -> int:
-        """Compute the padding length for the features array.
-
-        NOTE:
-            - Since 'ak.ravel' is not fully supported by 'dask_awkward', we allow the
-                logger to display the warning if the logging level is set to 'DEBUG'.
-            - The 'if not hasattr()' check is used for caching the dask result.
-
-        Args:
-            array: ak.Array: Awkward Array containing the data.
-
-        Returns:
-            int: Padding length at dimension 1 of the given array
-        """
-        if not hasattr(self, "_feature_padding_length"):
+            column = self.add_innermost_dimension(column)
 
             def _get_length() -> int:
-                return int(ak.max(ak.ravel(ak.num(array, axis=1))))
+                return int(ak.max(ak.ravel(ak.num(column, axis=1))))
 
             if logger.isEnabledFor(logging.DEBUG):
-                self._feature_padding_length = _get_length()
+                length = _get_length()
             else:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    self._feature_padding_length = _get_length()
+                    length = _get_length()
 
-        return self._feature_padding_length
-
-    @staticmethod
-    def add_innermost_dimension(array: ak.Array) -> ak.Array:
-        """Potentially add an inner dimension if the array is not 2D.
-
-        Works by trying to access the first element at axis 1. If that element
-        does not exist, add an inner dimension at axis 0 using ak.singletons().
-
-        Args:
-            array: ak.Array: The input data. If of shape (E, 1), nothing happens
-                and the original array is returned. If of shape (E,), an inner
-                dimension is added and the array is reshaped to (E, 1).
-
-        Returns:
-            ak.Array: The same array now shaped 2D (E, 1).
-
-        Example:
-            Case where the input array is 1D and needs an inner dimension added:
-            >>> print(PaddedEagerDataset.add_innermost_dimension([11, 52, 31]))
-            ak.Array([[11], [52], [31]])
-
-            Case where the input array is already 2D and nothing needs to be done:
-            >>> print(PaddedEagerDataset.add_innermost_dimension([[11], [52], [31]]))
-            ak.Array([[11], [52], [31]])
-        """
-        try:
-            _ = array[0][0]
-        except IndexError:
-            logger.debug("Added an extra dimension to the array at depth 0.")
-            array = ak.singletons(array, axis=0)
-        finally:
-            return array
+            self._padding_lengths[field] = length

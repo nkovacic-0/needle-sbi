@@ -6,9 +6,12 @@ at once without running into memory issues.
 """
 
 import reprlib
+import logging
+import warnings
 from typing import Any, Literal, Self, Type
 
 import dask_awkward as dak
+import awkward as ak
 import pydantic
 import uproot
 
@@ -78,6 +81,7 @@ class Ingestor:
             Ingestor: An self of this class with the data loaded into a Dask Awkward Array.
         """
         paths = [paths] if isinstance(paths, str) else paths
+        self.paths = paths 
         columns = [columns] if isinstance(columns, str) else columns
         format = self._resolve_format(format, paths[0])  # type: ignore
         reader_kwargs = reader_kwargs or {}
@@ -123,6 +127,97 @@ class Ingestor:
             raise ValueError(f"Field '{field}' not found in array.")
 
         return NestedArrayIndexer.get_nested_field(self.array, field, self.SEPARATOR)
+
+    # # TODO - test and validate this alternate padding calculation!
+    # def get_padding_length(self, field: str, method: Literal["dask", "pyarrow"] = "dask") -> int:
+    #     """Compute (and cache) the max per-event list length for a ragged field.
+    #     Args:
+    #         field (str): Field name, e.g. 'Lepton.pt'.
+    #         method (Literal["dask", "pyarrow"]): Computation strategy.
+    #             - "dask": lazy reduction over `self.array` via dask_awkward (default, always correct).
+    #             - "pyarrow": direct per-file reads via `brute_force_max_list_length`, bypassing the
+    #                 dask task graph. Opt-in; only reach for this if the "dask" path is a measured
+    #                 bottleneck (e.g. many small files).
+    #     Returns:
+    #         int: Max list length for `field` across the full dataset.
+    #     """
+    #     if not hasattr(self, "_padding_lengths"):
+    #         self._padding_lengths = {}
+    #     if field not in self._padding_lengths:
+    #         if method == "dask":
+    #             column = NestedArrayIndexer.get_nested_field(self.array, field, self.SEPARATOR)
+    #             # inline equivalent of PaddedDatasetBase.add_innermost_dimension
+    #             # duplicated intentionally rather than shared, to avoid etl-ml crossdependancy 
+    #             try:
+    #                 _ = column[0][0]
+    #             except IndexError:
+    #                 column = ak.singletons(column, axis=0)
+    #             def _get_length() -> int:
+    #                 return int(ak.max(ak.ravel(ak.num(column, axis=1))))
+    #             if logger.isEnabledFor(logging.DEBUG):
+    #                 length = _get_length()
+    #             else:
+    #                 with warnings.catch_warnings():
+    #                     warnings.simplefilter("ignore")
+    #                     length = _get_length()
+    #         elif method == "pyarrow":
+    #             length = brute_force_max_list_length(resolve_paths(self.paths), field)
+    #         else:
+    #             raise ValueError(f"Unknown method: {method}")
+    #         self._padding_lengths[field] = length
+    #     return self._padding_lengths[field]
+
+    # alternative for the code above, should be safer to run TODO - vlaidate this get_padding_length approach!
+    def get_padding_length(self, field: str, method: Literal["dask", "pyarrow"] = "dask") -> int:
+        if not hasattr(self, "_padding_lengths"):
+            self._padding_lengths = {}
+
+        if field not in self._padding_lengths:
+            if method == "dask":
+                try:
+                    length = self._get_padding_length_dask(field)
+                except Exception as e:
+                    logger.warning(
+                        f"Dask-based padding length computation failed for field '{field}' "
+                        f"({e!r}); falling back to pyarrow method."
+                    )
+                    length = brute_force_max_list_length(resolve_paths(self.paths), field)
+            elif method == "pyarrow":
+                length = brute_force_max_list_length(resolve_paths(self.paths), field)
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            self._padding_lengths[field] = length
+
+        return self._padding_lengths[field]
+
+    def _get_padding_length_dask(self, field: str) -> int:
+        column = NestedArrayIndexer.get_nested_field(self.array, field, self.SEPARATOR)
+        column = self._ensure_2d(column)
+
+        def _get_length() -> int:
+            return int(ak.max(ak.ravel(ak.num(column, axis=1))))
+
+        if logger.isEnabledFor(logging.DEBUG):
+            return _get_length()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return _get_length()
+
+    def _ensure_2d(self, column: dak.Array) -> dak.Array:
+        """Determine whether `column` needs a singleton inner dimension added, using a
+        cheap *eager* sample (one partition) rather than relying on lazy `dak.Array`
+        indexing to raise IndexError — that behavior isn't guaranteed to match eager
+        awkward semantics and could silently skip the reshape instead of erroring.
+        """
+        sample = column.partitions[0].compute()
+        try:
+            _ = sample[0][0]
+            return column  # already 2D, sample confirms no reshape needed
+        except IndexError:
+            # to note: ak.singletons on a lazy dak.Array is fine it's only the detection step that is risky
+            return ak.singletons(column, axis=0)
+
 
     def _check_if_all_columns_found(
         self,

@@ -57,7 +57,7 @@ class PaddedDataModule(L.LightningDataModule):
             max_number_events=self.dataset_config.max_number_events,
         )
         features.array = self.scaler.apply(features.array)
-        # no need for normalization of labels and wieghts
+        # no need for normalization of labels and weights
         # TODO - make this optional and configurable
         # labels.array = self.scaler.apply(labels.array)
         # weights.array = self.scaler.apply(weights.array)
@@ -93,6 +93,7 @@ class PaddedDataModule(L.LightningDataModule):
             self.weights,
             shuffle_partitions=self.shuffle_partitions,
             shuffle_events=self.shuffle_events,
+            weights_combine=self.dataset_config.weights_combine,
             kfold=kfold,
         )
         return DataLoader(
@@ -118,6 +119,7 @@ class PaddedDataModule(L.LightningDataModule):
             self.weights,
             shuffle_partitions=self.shuffle_partitions,
             shuffle_events=self.shuffle_events,
+            weights_combine=self.dataset_config.weights_combine,
             kfold=kfold,
         )
         return DataLoader(

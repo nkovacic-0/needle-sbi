@@ -22,6 +22,7 @@ class PaddedDataset(PaddedDatasetBase):
         self,
         features: Ingestor,
         labels: Ingestor,
+        weights: Ingestor,
     ):
         """
         Dataset structured as (E,P,F) tensors, where E is the number of events,
@@ -77,9 +78,11 @@ class PaddedDataset(PaddedDatasetBase):
         """
         self.features_ingestor = features
         self.labels_ingestor = labels
+        self.weights_ingestor = weights
 
         self.feature_names = features.fields
         self.labels_names = labels.fields
+        self.weights_names = weights.fields
 
         self.feature_tensors = self.convert_ak_to_tensor(
             self.features_ingestor.array.compute(),
@@ -89,11 +92,16 @@ class PaddedDataset(PaddedDatasetBase):
             self.labels_ingestor.array.compute(),
             self.labels_names,
         )
+        self.weights_tensors = self.convert_ak_to_tensor(
+            self.weights_ingestor.array.compute(),
+            self.weights_names,
+        )
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         x = self.feature_tensors[idx]
         y = self.label_tensors[idx]
-        return (x, y)
+        w = self.weights_tensors[idx]
+        return (x, y, w)
 
     def get_padding_length(self, array: ak.Array) -> int:
         """Compute the padding length for the features array.

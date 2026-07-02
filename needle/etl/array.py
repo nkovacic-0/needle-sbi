@@ -8,6 +8,7 @@ import awkward as ak
 import dask_awkward as dak
 import numpy as np
 import pyarrow.parquet as pq
+import pyarrow.compute as pc
 from awkward.errors import FieldNotFoundError
 from pyarrow import ArrowInvalid
 
@@ -81,6 +82,32 @@ def brute_force_length(
         int: The total length of the array
     """
     return brute_force_divisions(paths)[-1]
+
+def brute_force_max_list_length(paths: list[str], column: str) -> int:
+    """Compute the max per-event list length for a ragged column via direct pyarrow reads.
+    Args:
+        paths (list[str]): List of unique file paths (without wildcards) to loop over.
+        column (str): Dotted-path column name (e.g. 'Lepton.pt'), matching Ingestor.SEPARATOR
+            convention.
+    Returns:
+        int: Maximum list length observed for `column` across all given files.
+
+    Note:
+        Unlike brute_force_length, this is not a fallback for a failing dask computation!
+        This function exists as a potentially cheaper alternative when avoiding dask graph
+        construction overhead matters (e.g. many small files).
+    """
+    max_len = 0
+    try:
+        for file_path in paths:
+            table = pq.read_table(file_path, columns=[column])
+            lengths = pc.list_value_length(table.column(column).combine_chunks())
+            file_max = pc.max(lengths).as_py()
+            if file_max is not None:
+                max_len = max(max_len, file_max)
+    except ArrowInvalid as e:
+        logger.error(f"Could not determine max list length for column '{column}':\n{e}")
+    return max_len
 
 
 class NestedArrayIndexer:

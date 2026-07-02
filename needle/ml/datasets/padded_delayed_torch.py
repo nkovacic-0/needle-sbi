@@ -23,7 +23,9 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         shuffle_events: bool = True,
         random_seed: int = 42,
         kfold: KFold | None = None,
+        weights_combine: Literal["product", "sum"] = "product",
     ):
+        # TODO - update the docstring!
         """This class extends the PaddedEagerDataset to support chunked iterating with Torch.
 
         In the parent class, the data is loaded during instantiation. Instead, this class focusses
@@ -57,11 +59,14 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
 
         self.feature_names = features.fields
         self.labels_names = labels.fields
-        self.weights_names = wieghts.fields
+        self.weights_names = weights.fields
+        self.weights_combine = weights_combine
 
         self.features_queue = PartitionQueue(features.array)
         self.labels_queue = PartitionQueue(labels.array)
         self.weights_queue = PartitionQueue(weights.array)
+        
+        self._compute_padding_lengths(self.feature_names)
 
     def __iter__(self):
         """Yields individual events from the dataset in after loading them in chunks.
@@ -112,18 +117,26 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
             labels_partition = self.labels_queue.load_partition_thread_safe(partition_id, slicing_index)
             weights_partition = self.weights_queue.load_partition_thread_safe(partition_id, slicing_index)
 
-            features_tensor = self.convert_ak_to_tensor(
-                features_partition.compute(),
-                self.feature_names,
+            features_tensor = self.convert_ragged_to_tensor(
+                features_partition.compute(), 
+                self.feature_names, 
+                self.features_ingestor
             )
-            labels_tensor = self.convert_ak_to_tensor(
-                labels_partition.compute(),
-                self.labels_names,
+            labels_tensor = self.convert_flat_to_tensor(
+                labels_partition.compute(), 
+                self.labels_names, 
+                self.labels_ingestor, reduce="stack"
             )
-            weights_tensor = self.convert_ak_to_tensor(
-                weights_partition.compute(),
-                self.weights_names,
+            weights_tensor = self.convert_flat_to_tensor(
+                weights_partition.compute(), 
+                self.weights_names, 
+                self.weights_ingestor, 
+                reduce=self.weights_combine
             )
+
+            if labels_tensor.ndim == 2 and labels_tensor.shape[-1] == 1:
+                labels_tensor = labels_tensor.squeeze(-1)
+
             event_indices = range(len(features_tensor))
 
             if self.shuffle_events:
