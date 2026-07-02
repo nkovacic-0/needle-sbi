@@ -36,7 +36,10 @@ class PaddedDatasetBase(Dataset, ABC):
 
     @abstractmethod
     def __init__(self, *args, **kwargs):
-        self._compute_padding_lengths(self.feature_names)
+        pass
+
+    def __len__(self) -> int:
+        return self.features_ingestor.length
 
     def convert_ragged_to_tensor(self, array: ak.Array, fields: list[str], ingestor: Ingestor) -> torch.Tensor:
         # TODO - check that the docstring explains what is going on (I'm continuosly making code updates, but not docstring updates)
@@ -83,42 +86,84 @@ class PaddedDatasetBase(Dataset, ABC):
             raise ValueError(f"Unknown reduce mode: {reduce}")
         return torch.tensor(combined, dtype=torch.float32)
 
+
     def _compute_padding_lengths(self, fields: list[str]) -> None:
-    # TODO - is this actually sane? i.e. I didn't see NEEDLE pre-computng the 
-    # padding scheme, but that is very much surprising, can it be that I missed it???
-    """Precompute and cache the global padding length for each ragged field.
-
-    Important:
-        Must be called once, in `__init__`, using the full un-computed
-        dask_awkward array (`self.features_ingestor.array`) — not a
-        partition-level slice. Because the result is cached per field and
-        reused across every partition and every worker, computing it from
-        a single partition would silently apply the wrong padding length
-        to all other partitions (risking truncation of real particles via
-        `clip=True`), and independently-computed values across torch
-        DataLoader workers could disagree entirely, producing inconsistent
-        tensor shapes across a batch.
-    """
-        if not hasattr(self, "_padding_lengths"):
-            self._padding_lengths = {}
-
+        """Trigger (and cache, via Ingestor) padding-length computation for ragged fields.
+        Delegates to `self.features_ingestor.get_padding_length`, which owns the actual
+        caching — shared across any Dataset instances built from the same Ingestor
+        (e.g. train/val), so this only pays the real computation cost once per run.
+        """
         for field in fields:
-            if field in self._padding_lengths:
-                continue
+            self.features_ingestor.get_padding_length(field)
 
-            column = NestedArrayIndexer.get_nested_field(
-                self.features_ingestor.array, field, self.features_ingestor.SEPARATOR
-            )
-            column = self.add_innermost_dimension(column)
+    def get_padding_length(self, field: str) -> int:
+        return self.features_ingestor.get_padding_length(field)
 
-            def _get_length() -> int:
-                return int(ak.max(ak.ravel(ak.num(column, axis=1))))
+    # def _compute_padding_lengths(self, fields: list[str]) -> None:
+    # # TODO - is this actually sane? i.e. I didn't see NEEDLE pre-computng the 
+    # # padding scheme, but that is very much surprising, can it be that I missed it???
+    # # -- seems like there realy was not pre-computed padding scheme... 
+    # # this functions is now deprecated in favor of the new function above...
+    # """Precompute and cache the global padding length for each ragged field.
 
-            if logger.isEnabledFor(logging.DEBUG):
-                length = _get_length()
-            else:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    length = _get_length()
+    # Important:
+    #     Must be called once, in `__init__`, using the full un-computed
+    #     dask_awkward array (`self.features_ingestor.array`) — not a
+    #     partition-level slice. Because the result is cached per field and
+    #     reused across every partition and every worker, computing it from
+    #     a single partition would silently apply the wrong padding length
+    #     to all other partitions (risking truncation of real particles via
+    #     `clip=True`), and independently-computed values across torch
+    #     DataLoader workers could disagree entirely, producing inconsistent
+    #     tensor shapes across a batch.
+    # """
+    #     if not hasattr(self, "_padding_lengths"):
+    #         self._padding_lengths = {}
+    #     for field in fields:
+    #         if field in self._padding_lengths:
+    #             continue
+    #         column = NestedArrayIndexer.get_nested_field(
+    #             self.features_ingestor.array, field, self.features_ingestor.SEPARATOR
+    #         )
+    #         column = self.add_innermost_dimension(column)
+    #         def _get_length() -> int:
+    #             return int(ak.max(ak.ravel(ak.num(column, axis=1))))
+    #         if logger.isEnabledFor(logging.DEBUG):
+    #             length = _get_length()
+    #         else:
+    #             with warnings.catch_warnings():
+    #                 warnings.simplefilter("ignore")
+    #                 length = _get_length()
+    #         self._padding_lengths[field] = length
 
-            self._padding_lengths[field] = length
+    @staticmethod
+    def add_innermost_dimension(array: ak.Array) -> ak.Array:
+        """Potentially add an inner dimension if the array is not 2D.
+
+        Works by trying to access the first element at axis 1. If that element
+        does not exist, add an inner dimension at axis 0 using ak.singletons().
+
+        Args:
+            array: ak.Array: The input data. If of shape (E, 1), nothing happens
+                and the original array is returned. If of shape (E,), an inner
+                dimension is added and the array is reshaped to (E, 1).
+
+        Returns:
+            ak.Array: The same array now shaped 2D (E, 1).
+
+        Example:
+            Case where the input array is 1D and needs an inner dimension added:
+            >>> print(PaddedEagerDataset.add_innermost_dimension([11, 52, 31]))
+            ak.Array([[11], [52], [31]])
+
+            Case where the input array is already 2D and nothing needs to be done:
+            >>> print(PaddedEagerDataset.add_innermost_dimension([[11], [52], [31]]))
+            ak.Array([[11], [52], [31]])
+        """
+        try:
+            _ = array[0][0]
+        except IndexError:
+            logger.debug("Added an extra dimension to the array at depth 0.")
+            array = ak.singletons(array, axis=0)
+        finally:
+            return array

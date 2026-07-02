@@ -42,6 +42,7 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         self.features_ingestor = features
         self.labels_ingestor = labels
         self.weights_ingestor = weights
+        
         self.shuffle_partitions = shuffle_partitions
         self.shuffle_events = shuffle_events
         self.random_seed = random_seed
@@ -51,7 +52,7 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         self.labels_names = labels.fields
         self.weights_names = weights.fields
         self.weights_combine = weights_combine
-        
+
         self._compute_padding_lengths(self.feature_names)
 
     def __iter__(self):

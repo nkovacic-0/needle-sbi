@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from typing import Literal
 from torch.utils.data import IterableDataset
 
 from needle.etl.dask_ingestor import Ingestor
@@ -65,7 +66,7 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         self.features_queue = PartitionQueue(features.array)
         self.labels_queue = PartitionQueue(labels.array)
         self.weights_queue = PartitionQueue(weights.array)
-        
+
         self._compute_padding_lengths(self.feature_names)
 
     def __iter__(self):
