@@ -76,6 +76,9 @@ class PaddedDatasetBase(Dataset, ABC):
         ]
         if len(columns) == 1:
             combined = columns[0]
+        # stach is intended for labels, however, this will BREAK if anything other than 1-D fields are passed to labels
+        # so, F colums/fields each of dim 1, is fine and yields (E, F)
+        # TODO - see if we want to expand this functionality, or revert to padded labels?
         elif reduce == "stack":
             combined = np.stack(columns, axis=-1)
         elif reduce == "product":
@@ -84,6 +87,12 @@ class PaddedDatasetBase(Dataset, ABC):
             combined = np.sum(np.stack(columns, axis=-1), axis=-1)
         else:
             raise ValueError(f"Unknown reduce mode: {reduce}")
+        # if combined.ndim == 2:
+        #     assert combined.shape[-1] == len(fields), (
+        #         f"Stacked label tensor has {combined.shape[-1]} columns but {len(fields)} fields were requested:"
+        #         f" {fields}. "
+        #         f"This would misalign downstream `collate_fn` label naming."
+        #     )
         return torch.tensor(combined, dtype=torch.float32)
 
 

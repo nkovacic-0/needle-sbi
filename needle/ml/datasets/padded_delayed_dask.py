@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Literal
 from torch.utils.data import IterableDataset
 
 from needle.etl.dask_ingestor import Ingestor

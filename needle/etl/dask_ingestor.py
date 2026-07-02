@@ -204,19 +204,30 @@ class Ingestor:
             warnings.simplefilter("ignore")
             return _get_length()
 
+    # def _ensure_2d(self, column: dak.Array) -> dak.Array:
+    #     """Determine whether `column` needs a singleton inner dimension added, using a
+    #     cheap *eager* sample (one partition) rather than relying on lazy `dak.Array`
+    #     indexing to raise IndexError — that behavior isn't guaranteed to match eager
+    #     awkward semantics and could silently skip the reshape instead of erroring.
+    #     """
+    #     sample = column.partitions[0].compute()
+    #     try:
+    #         _ = sample[0][0]
+    #         return column  # already 2D, sample confirms no reshape needed
+    #     except IndexError:
+    #         # to note: ak.singletons on a lazy dak.Array is totally fine, it's only the above detection step which is risky
+    #         return ak.singletons(column, axis=0)
+
+    # alternative to the function above, using dask column.ndim
+    # however, the behaviour of ndim can get weird if an unusual nested-record schema is used (allegedly, not tested)
     def _ensure_2d(self, column: dak.Array) -> dak.Array:
-        """Determine whether `column` needs a singleton inner dimension added, using a
-        cheap *eager* sample (one partition) rather than relying on lazy `dak.Array`
-        indexing to raise IndexError — that behavior isn't guaranteed to match eager
-        awkward semantics and could silently skip the reshape instead of erroring.
+        """Determine whether `column` needs a singleton inner dimension added, using
+        dask_awkward's typetracer metadata — a schema-only check that requires no
+        data to be read, rather than eagerly materializing a partition.
         """
-        sample = column.partitions[0].compute()
-        try:
-            _ = sample[0][0]
-            return column  # already 2D, sample confirms no reshape needed
-        except IndexError:
-            # to note: ak.singletons on a lazy dak.Array is fine it's only the detection step that is risky
+        if column.ndim < 2:
             return ak.singletons(column, axis=0)
+        return column
 
 
     def _check_if_all_columns_found(
