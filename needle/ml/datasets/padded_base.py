@@ -32,6 +32,8 @@ class PaddedDatasetBase(Dataset, ABC):
 
     features_ingestor: Ingestor
     labels_ingestor: Ingestor
+    weights_ingestor: Ingestor
+   
 
     @abstractmethod
     def __init__(self, *args, **kwargs):

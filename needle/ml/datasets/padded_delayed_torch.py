@@ -18,6 +18,7 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         self,
         features: Ingestor,
         labels: Ingestor,
+        weights: Ingestor,
         shuffle_partitions: bool = False,
         shuffle_events: bool = True,
         random_seed: int = 42,
@@ -47,6 +48,7 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         """
         self.features_ingestor = features
         self.labels_ingestor = labels
+        self.weights_ingestor = weights
 
         self.shuffle_partitions = shuffle_partitions
         self.shuffle_events = shuffle_events
@@ -55,9 +57,11 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
 
         self.feature_names = features.fields
         self.labels_names = labels.fields
+        self.weights_names = wieghts.fields
 
         self.features_queue = PartitionQueue(features.array)
         self.labels_queue = PartitionQueue(labels.array)
+        self.weights_queue = PartitionQueue(weights.array)
 
     def __iter__(self):
         """Yields individual events from the dataset in after loading them in chunks.
@@ -66,7 +70,7 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         chunks based on the worker ID (as determined by torch.utils.data.get_worker_info()).
 
         Yields:
-            tuple: A tuple (features, labels) of torch Tensors
+            tuple: A tuple (features, labels, weights) of torch Tensors
 
         Note:
             Optionally, both the chunks and the events can be shuffled before yielding.
@@ -106,6 +110,7 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         for partition_id, slicing_index in partitions.items():
             features_partition = self.features_queue.load_partition_thread_safe(partition_id, slicing_index)
             labels_partition = self.labels_queue.load_partition_thread_safe(partition_id, slicing_index)
+            weights_partition = self.weights_queue.load_partition_thread_safe(partition_id, slicing_index)
 
             features_tensor = self.convert_ak_to_tensor(
                 features_partition.compute(),
@@ -115,11 +120,14 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
                 labels_partition.compute(),
                 self.labels_names,
             )
-
+            weights_tensor = self.convert_ak_to_tensor(
+                weights_partition.compute(),
+                self.weights_names,
+            )
             event_indices = range(len(features_tensor))
 
             if self.shuffle_events:
                 event_indices = rng.permutation(event_indices)
 
             for event_idx in event_indices:
-                yield (features_tensor[event_idx], labels_tensor[event_idx])
+                yield (features_tensor[event_idx], labels_tensor[event_idx], weights_tensor[event_idx])

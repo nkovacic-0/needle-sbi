@@ -4,7 +4,7 @@ import lightning as L
 from torch.utils.data import DataLoader
 
 from needle.etl.dask_ingestor import Ingestor
-from needle.etl.normalization import MinMaxScaler
+from needle.etl.normalization import MinMaxScaler, StandardScaler
 from needle.ml.datasets import PaddedDaskDataset, PaddedTorchDataset
 from needle.ml.datasets.kfold import KFold
 from needle.utils.config_schema import DatasetConfig
@@ -31,7 +31,8 @@ class PaddedDataModule(L.LightningDataModule):
         self.multiprocessing_type = multiprocessing_type
         self.shuffle_partitions = shuffle_partitions
         self.shuffle_events = shuffle_events
-        self.scaler = MinMaxScaler()
+        # TODO - make the choice of sclaer (and user defined scaler class) configurable
+        self.scaler = StandardScaler() #MinMaxScaler()
 
     def setup(self, stage: str | None = None) -> None:
         features = Ingestor(
@@ -48,11 +49,22 @@ class PaddedDataModule(L.LightningDataModule):
             reader_kwargs=self.dataset_config.dak_reader_kwargs,
             max_number_events=self.dataset_config.max_number_events,
         )
+        weights = Ingestor(
+            self.dataset_config.paths,
+            format=self.dataset_config.format,
+            columns=self.dataset_config.weights_columns,
+            reader_kwargs=self.dataset_config.dak_reader_kwargs,
+            max_number_events=self.dataset_config.max_number_events,
+        )
         features.array = self.scaler.apply(features.array)
-        labels.array = self.scaler.apply(labels.array)
+        # no need for normalization of labels and wieghts
+        # TODO - make this optional and configurable
+        # labels.array = self.scaler.apply(labels.array)
+        # weights.array = self.scaler.apply(weights.array)
 
         self.features = features
         self.labels = labels
+        self.weights = weights
 
     @staticmethod
     def get_dataset(name: str):
@@ -78,6 +90,7 @@ class PaddedDataModule(L.LightningDataModule):
         dataset = self.get_dataset(self.multiprocessing_type)(
             self.features,
             self.labels,
+            self.weights,
             shuffle_partitions=self.shuffle_partitions,
             shuffle_events=self.shuffle_events,
             kfold=kfold,
@@ -102,6 +115,7 @@ class PaddedDataModule(L.LightningDataModule):
         dataset = self.get_dataset(self.multiprocessing_type)(
             self.features,
             self.labels,
+            self.weights,
             shuffle_partitions=self.shuffle_partitions,
             shuffle_events=self.shuffle_events,
             kfold=kfold,

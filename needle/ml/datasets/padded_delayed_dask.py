@@ -17,6 +17,7 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         self,
         features: Ingestor,
         labels: Ingestor,
+        weights: Ingestor,
         shuffle_partitions: bool = False,
         shuffle_events: bool = True,
         random_seed: int = 42,
@@ -38,6 +39,7 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         """
         self.features_ingestor = features
         self.labels_ingestor = labels
+        self.weights_ingestor = weights
         self.shuffle_partitions = shuffle_partitions
         self.shuffle_events = shuffle_events
         self.random_seed = random_seed
@@ -45,13 +47,17 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
 
         self.feature_names = features.fields
         self.labels_names = labels.fields
+        self.weights_names = weights.fields
 
     def __iter__(self):
         """Iterate through partitions sequentially
 
         Yields:
-            tuple: A tuple (features, labels) of torch Tensors with shape (P, F)
+            tuple: A tuple (features, labels, weights) of torch Tensors with shape (P, F)
         """
+        # note: this implementation of rng won't always be completely consistent 
+        # as the result of the call can depend on the hardware (so, different results
+        # could be observed when running on different cluster nodes, even with same seed)
         rng = np.random.default_rng(self.random_seed)
 
         if self.kfold:
@@ -67,6 +73,7 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         for partition_id, slicing_index in partitions.items():
             features_partition = load_partition(self.features_ingestor.array, partition_id, slicing_index)
             labels_partition = load_partition(self.labels_ingestor.array, partition_id, slicing_index)
+            weights_partition = load_partition(self.weights_ingestor.array, partition_id, slicing_index)
 
             features_tensor = self.convert_ak_to_tensor(
                 features_partition.compute(),
@@ -76,10 +83,14 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
                 labels_partition.compute(),
                 self.labels_names,
             )
+            weights_tensor = self.convert_ak_to_tensor(
+                weights_partition.compute(),
+                self.weights_names,
+            )
             event_indices = list(range(len(features_tensor)))
 
             if self.shuffle_events:
                 event_indices = rng.permutation(event_indices)
 
             for event_idx in event_indices:
-                yield (features_tensor[event_idx], labels_tensor[event_idx])
+                yield (features_tensor[event_idx], labels_tensor[event_idx], weights_tensor[event_idx])

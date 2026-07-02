@@ -30,6 +30,7 @@ class DatasetConfig(SerializableDataclass):
     paths: str = ""
     features_columns: Optional[List[str]] = field(default_factory=list)
     labels_columns: Optional[List[str]] = field(default_factory=list)
+    weights_columns: Optional[List[str]] = field(default_factory=list)
     format: str = "automatic"
     dak_reader_kwargs: dict[str, Any] = field(default_factory=dict)
     max_number_events: int = -1
