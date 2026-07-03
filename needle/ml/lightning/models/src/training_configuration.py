@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from needle.utils.logging import ColorFormatter
+
 logger = ColorFormatter.get_logger("ml")
 
 def custom_configure_optimizers(
@@ -77,14 +79,19 @@ def custom_configure_optimizers(
     if scheduler_cls is None:
         return {"optimizer": optimizer}
 
+    # getting errors for lightning-specific kwards, like 'interval'
+    # added this exlusion for that reason
+    _lightning_scheduler_keys = {"scheduler", "interval", "frequency", "monitor"}
+
     scheduler_kwargs = {
         **scheduler_defaults,
         **{
             k: v
             for k, v in scheduler_config.items()
-            if k != "scheduler"
+            if k not in _lightning_scheduler_keys
         },
     }
+
     scheduler = scheduler_cls(optimizer, **scheduler_kwargs)
     lr_scheduler_config = {
         "scheduler": scheduler,

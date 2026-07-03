@@ -8,7 +8,7 @@ from needle.ml.lightning.models.src.mlp_model import MLP
 from needle.ml.lightning.models.src.attention import Attention
 from needle.ml.lightning.models.src.embedding import MLPEmbedding
 from needle.ml.lightning.models.src.transformer_block import TransformerBlock
-from needle.ml.lightning.models.src.pooling import pooling
+from needle.ml.lightning.models.src.pooling import Pooling
 
 
 from needle.utils.logging import ColorFormatter

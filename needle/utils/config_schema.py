@@ -12,13 +12,20 @@ The sibling module to this one `config_utils` stores all the functions that
 help construct the config from file.
 """
 
+from enum import Enum
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Literal
 
 from omegaconf import MISSING
 
 from needle.utils.dataclass import SerializableDataclass
 
+
+
+
+class WeightsCombine(str, Enum):
+    product = "product"
+    sum = "sum"
 
 @dataclass
 class DatasetConfig(SerializableDataclass):
@@ -31,6 +38,10 @@ class DatasetConfig(SerializableDataclass):
     features_columns: Optional[List[str]] = field(default_factory=list)
     labels_columns: Optional[List[str]] = field(default_factory=list)
     weights_columns: Optional[List[str]] = field(default_factory=list)
+    # issue: OmegaConf doesn't undersand Literal, so the workaround to enforce the two types is the 
+    # WeightsCombineSupport class
+    # weights_combine: Optional[Literal["product", "sum"]] = "product"
+    weights_combine: Optional[WeightsCombine] = WeightsCombine.product
     format: str = "automatic"
     dak_reader_kwargs: dict[str, Any] = field(default_factory=dict)
     max_number_events: int = -1

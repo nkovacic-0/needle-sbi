@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from typing import Any
+from typing import Any, Callable
 from collections.abc import Sequence
 
 from needle.ml.lightning.models.src.mlp_model import MLP

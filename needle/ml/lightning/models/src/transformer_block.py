@@ -17,7 +17,7 @@ class TransformerBlock(nn.Module):
         transformer_block_n_heads: int,
         transformer_block_atttn_type: str = "default_torchMHA",
         transformer_block_atttn_kwargs: dict | None = None,
-        transformer_block_mlp_hidden_layers: Sequence[int],
+        transformer_block_mlp_hidden_layers: Sequence[int] = 1,
         transformer_block_mlp_kwargs: dict | None = None,
         transformer_block_dropout: float = 0.1,
         transformer_block_residual_mode: str = "standard",

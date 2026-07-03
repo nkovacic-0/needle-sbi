@@ -103,7 +103,7 @@ class PaddedDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=dataset.SHUFFLE_ALLOWED,
             num_workers=self.n_workers if dataset.TORCH_MULTIPROCESSING_ALLOWED else 0,
-            # collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
+            collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -130,7 +130,7 @@ class PaddedDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=dataset.SHUFFLE_ALLOWED,
             num_workers=self.n_workers if dataset.TORCH_MULTIPROCESSING_ALLOWED else 0,
-            # collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
+            collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
         )
 
 def padded_collate_fn(batch, label_names: list[str]):

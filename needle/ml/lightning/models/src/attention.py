@@ -6,7 +6,7 @@ from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("ml")
 
-# this class is completely untested and should not be used, for now as there might be a few more open issues with it
+# this class is mostly untested and should be used with caution, as for now there might be a few more open issues with it
 class Attention(nn.Module):
     def __init__(
         self,
