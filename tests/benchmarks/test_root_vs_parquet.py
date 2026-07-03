@@ -58,6 +58,7 @@ def benchmark_config() -> EstimatorConfig:
         paths="",  # Will be overridden by the test
         features_columns=[],  # Will be set by BenchmarkUtility.get_column()
         labels_columns=[],
+        weights_columns=[],
         format="automatic",
         max_number_events=-1,  # Will be set by the test
     )

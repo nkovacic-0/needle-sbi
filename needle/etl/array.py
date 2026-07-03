@@ -9,8 +9,10 @@ import dask_awkward as dak
 import numpy as np
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
+
 from awkward.errors import FieldNotFoundError
 from pyarrow import ArrowInvalid
+from pyarrow.lib import ArrowException
 
 from needle.utils.logging import ColorFormatter
 
@@ -105,8 +107,11 @@ def brute_force_max_list_length(paths: list[str], column: str) -> int:
             file_max = pc.max(lengths).as_py()
             if file_max is not None:
                 max_len = max(max_len, file_max)
-    except ArrowInvalid as e:
+    # except ArrowInvalid as e:
+    # debugging: swapped ArrowInvalid to ArrowExceptin and added raise after the logger
+    except ArrowException as e:
         logger.error(f"Could not determine max list length for column '{column}':\n{e}")
+        raise
     return max_len
 
 

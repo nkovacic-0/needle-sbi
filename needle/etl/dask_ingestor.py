@@ -20,6 +20,7 @@ from needle.etl.array import (
     brute_force_divisions,
     brute_force_length,
     resolve_paths,
+    brute_force_max_list_length,
 )
 from needle.utils.logging import ColorFormatter
 
@@ -195,8 +196,16 @@ class Ingestor:
         column = NestedArrayIndexer.get_nested_field(self.array, field, self.SEPARATOR)
         column = self._ensure_2d(column)
 
+        # the way I set the padding length calc seems not to be actually compatible with dask!
+        # the issue might be in the fact that I get a scalar object, the first attempt at fixing is below
+        # def _get_length() -> int:
+        #     return int(ak.max(ak.ravel(ak.num(column, axis=1))))
+        # this however, had a potentially very expensive compute TODO - see if there's a better way
         def _get_length() -> int:
-            return int(ak.max(ak.ravel(ak.num(column, axis=1))))
+            result = ak.max(ak.ravel(ak.num(column, axis=1)))
+            if hasattr(result, "compute"):
+                result = result.compute()
+            return int(result)
 
         if logger.isEnabledFor(logging.DEBUG):
             return _get_length()

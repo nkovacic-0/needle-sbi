@@ -129,7 +129,7 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         output = self(x, cond_x=cond_x)
 
         # i our labels only have 1 dim, we can just unwrap dict{str: torch.tensor} with the util function
-        labels = _unwrap_labels(labels)
+        labels = unwrap_labels(labels)
         # output: (B, 1), labels: (B,) or (B, 1) — align shapes for BCEWithLogitsLoss
         output = output.squeeze(-1)
         labels = labels.float()
