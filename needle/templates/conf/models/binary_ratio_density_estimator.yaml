@@ -1,94 +1,118 @@
-_target_: ml.lightning.models.ratio_density_est_binary_cl.RatioDensityEstimatorBinary
+_target_: needle.ml.lightning.models.ratio_density_est_binary_cl.RatioDensityEstimatorBinary
 
-model_configs:
-  weighted_loss: null # None or 'mean' or 'weighted_mean'
-  # we only literally need the 'features_columns' entry from dataset_config if it isn't None
-  # however, we can also manually define the number of features per token (particle) that get passed
-  # by defining num_features_in
-  dataset_config: null
-  num_features_in: 4
-  optimizer_configs: dict,
-    optimizer: adamw
-    lr: 3e-4
-    weight_decay: 0.01
-    scheduler:
-      scheduler: cosine_annealing
-      T_max: 100
-      eta_min: 1e-6
-      interval: epoch
+# model_configs:
+weighted_loss: mean # None or 'mean' or 'weighted_mean'
+# we only literally need the 'features_columns' entry from dataset_config if it isn't None
+# however, we can also manually define the number of features per token (particle) that get passed
+# by defining num_features_in
+dataset_config: # null
+  paths: "/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/FAIR_Universe_HiggsML_data_ztautau_classification.parquet"
+  features_columns: [
+    'PRI_lep_pt',
+    'PRI_lep_eta',
+    'PRI_lep_phi',
+    'PRI_had_pt',
+    'PRI_had_eta',
+    'PRI_had_phi',
+    'PRI_jet_leading_pt',
+    'PRI_jet_leading_eta',
+    'PRI_jet_leading_phi',
+    'PRI_jet_subleading_pt',
+    'PRI_jet_subleading_eta',
+    'PRI_jet_subleading_phi',
+    'PRI_n_jets',
+    'PRI_jet_all_pt',
+    'PRI_met',
+    'PRI_met_phi',
+  ]
+  format: parquet
+  weights_columns: ["normalized_weight_ztautau_vs_others"]
+  labels_columns: ["label_ztautau_vs_others"]
+  max_number_events: -1
+  weights_combine: product
+num_features_in: null
+optimizer_configs:
+  optimizer: adamw
+  lr: 3e-4
+  weight_decay: 0.01
+  scheduler:
+    scheduler: cosine_annealing
+    T_max: 100
+    eta_min: 1e-6
+    interval: epoch
   
-  transformer_model_configs: 
-    batch_first: true
-    ############################################
-    # embedding, supported: 'mlp', None
-    # for embedding_kwargs for 'mlp' embedding see mlp_head_kwargs
-    embedding_type: mlp
-    embedding_hidden_layers: [64, 64]
-    embedding_output_dim: 64
-    embedding_kwargs: {}
-      # # currently, only the mlp embedding is supported ()
-      # # for activations: supported: whole nn.Module; nn.Module.activation; string
-      # # activation_kwargs is only used if activation is set to a string or nn.Module.activation, 
-      # # they get directly unpacked into it
-      # activation: relu
-      # activation_kwargs: {}
-      # # exactly the same applied for the output activation
-      # output_activation: relu
-      # output_activation_kwargs: {}
-      # use_dropout: false
-      # dropout_prob: 0.5
-      # # supported norms "batchnorm", "layernorm"
-      # # careful with batchnorm if using MLP for the embedding and withing the transf. blocks 
-      # normalization: null
-      # # supported inits: 'kaiming', 'xavier', 'normal', 'zeros'
-      # init: kaiming
-    ############################################
-    # transformer blocks
-    n_transformer_blocks: 4
-    transformer_block_n_heads: 4
-    # supported "mha", "sdpa", "gqa", and 'default_torchMHA'
-    # best to use 'default_torchMHA' as it directly unpacks all transformer_block_attn_kwargs 
-    # into nn.MultiHeadAttention, for other options you can only specify dropout, num_kv_heads and bias 
-    # transformer_block_attn_kwargs get passed to the attn directly and unpacked
-    transformer_block_attn_type: default_torchMHA
-    transformer_block_attn_kwargs: {}
-      # dropout: 0.0,
-      # num_kv_heads: null
-      # bias: True,
-    # transformer_block_mlp_kwargs are the same as embedding_kwargs for MLP embedding
-    transformer_block_mlp_hidden_layers: [256, 256]
-    transformer_block_mlp_kwargs: {}
-    # dropout, if defined here in the config will apply to all elements in the transformer block
-    transformer_block_dropout: 0.1
-    # controls the skip connections, best to use 'standard' for shallower models and 
-    # 'coupled' for very deep models
-    transformer_block_residual_mode: standard
-    # conditioning in the transformer blocks, injects 'x_cond' (as defined in the forward) 
-    # after the 'normal' attention via cross attn
-    use_conditioning: false
-    cond_dim: null
-    condscale_startval: 0.0
-    # supported poolings: "mean", "max", "cls", "last", "attention"
-    pool_type: mean
-    pool_dropout: 0.0
-    ############################################
-    # MLP head
-    mlp_head_hidden_layers: [128]
-    mlp_head_outdim: 1
-    mlp_head_kwargs: 
-      # for activations: supported: whole nn.Module; nn.Module.activation; string
-      # activation_kwargs is only used if activation is set to a string or nn.Module.activation, 
-      # they get directly unpacked into it
-      activation: relu
-      activation_kwargs: {}
-      # exactly the same applied for the output activation
-      output_activation: null
-      output_activation_kwargs: {}
-      use_dropout: false
-      dropout_prob: 0.5
-      # supported norms "batchnorm", "layernorm"
-      # careful with batchnorm if using MLP for the embedding and withing the transf. blocks 
-      normalization: null
-      # supported inits: 'kaiming', 'xavier', 'normal', 'zeros'
-      init: kaiming
+transformer_model_configs: 
+  batch_first: true
+  ############################################
+  # embedding, supported: 'mlp', None
+  # for embedding_kwargs for 'mlp' embedding see mlp_head_kwargs
+  embedding_type: mlp
+  embedding_hidden_layers: [64, 64]
+  embedding_output_dim: 64
+  embedding_kwargs: {}
+    # # currently, only the mlp embedding is supported ()
+    # # for activations: supported: whole nn.Module; nn.Module.activation; string
+    # # activation_kwargs is only used if activation is set to a string or nn.Module.activation, 
+    # # they get directly unpacked into it
+    # activation: relu
+    # activation_kwargs: {}
+    # # exactly the same applied for the output activation
+    # output_activation: relu
+    # output_activation_kwargs: {}
+    # use_dropout: false
+    # dropout_prob: 0.5
+    # # supported norms "batchnorm", "layernorm"
+    # # careful with batchnorm if using MLP for the embedding and withing the transf. blocks 
+    # normalization: null
+    # # supported inits: 'kaiming', 'xavier', 'normal', 'zeros'
+    # init: kaiming
+  ############################################
+  # transformer blocks
+  n_transformer_blocks: 4
+  transformer_block_n_heads: 4
+  # supported "mha", "sdpa", "gqa", and 'default_torchMHA'
+  # best to use 'default_torchMHA' as it directly unpacks all transformer_block_attn_kwargs 
+  # into nn.MultiHeadAttention, for other options you can only specify dropout, num_kv_heads and bias 
+  # transformer_block_attn_kwargs get passed to the attn directly and unpacked
+  transformer_block_attn_type: default_torchMHA
+  transformer_block_attn_kwargs: {}
+    # dropout: 0.0,
+    # num_kv_heads: null
+    # bias: True,
+  # transformer_block_mlp_kwargs are the same as embedding_kwargs for MLP embedding
+  transformer_block_mlp_hidden_layers: [256, 256]
+  transformer_block_mlp_kwargs: {}
+  # dropout, if defined here in the config will apply to all elements in the transformer block
+  transformer_block_dropout: 0.1
+  # controls the skip connections, best to use 'standard' for shallower models and 
+  # 'coupled' for very deep models
+  transformer_block_residual_mode: standard
+  # conditioning in the transformer blocks, injects 'x_cond' (as defined in the forward) 
+  # after the 'normal' attention via cross attn
+  use_conditioning: false
+  cond_dim: null
+  condscale_startval: 0.0
+  # supported poolings: "mean", "max", "cls", "last", "attention"
+  pool_type: mean
+  pool_dropout: 0.0
+  ############################################
+  # MLP head
+  mlp_head_hidden_layers: [128]
+  mlp_head_outdim: 1
+  mlp_head_kwargs: 
+    # for activations: supported: whole nn.Module; nn.Module.activation; string
+    # activation_kwargs is only used if activation is set to a string or nn.Module.activation, 
+    # they get directly unpacked into it
+    activation: relu
+    activation_kwargs: {}
+    # exactly the same applied for the output activation
+    output_activation: null
+    output_activation_kwargs: {}
+    use_dropout: false
+    dropout_prob: 0.5
+    # supported norms "batchnorm", "layernorm"
+    # careful with batchnorm if using MLP for the embedding and withing the transf. blocks 
+    normalization: null
+    # supported inits: 'kaiming', 'xavier', 'normal', 'zeros'
+    init: kaiming
 

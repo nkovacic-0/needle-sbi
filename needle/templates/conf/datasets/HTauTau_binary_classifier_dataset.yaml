@@ -1,0 +1,24 @@
+paths: "/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/FAIR_Universe_HiggsML_data_ztautau_classification.parquet"
+features_columns: [
+  'PRI_lep_pt',
+  'PRI_lep_eta',
+  'PRI_lep_phi',
+  'PRI_had_pt',
+  'PRI_had_eta',
+  'PRI_had_phi',
+  'PRI_jet_leading_pt',
+  'PRI_jet_leading_eta',
+  'PRI_jet_leading_phi',
+  'PRI_jet_subleading_pt',
+  'PRI_jet_subleading_eta',
+  'PRI_jet_subleading_phi',
+  'PRI_n_jets',
+  'PRI_jet_all_pt',
+  'PRI_met',
+  'PRI_met_phi',
+]
+format: parquet
+weights_columns: ["normalized_weight_ztautau_vs_others"]
+labels_columns: ["label_ztautau_vs_others"]
+max_number_events: -1
+weights_combine: product
