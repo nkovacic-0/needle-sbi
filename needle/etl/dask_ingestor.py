@@ -238,6 +238,24 @@ class Ingestor:
             return ak.singletons(column, axis=0)
         return column
 
+    def get_all_padding_lengths(self) -> dict[str, int]:
+        """Return a shallow copy of the currently cached padding lengths.
+        Used for access of the private _padding_lengths. This is not entirely 
+        neccessary for functioning but a nice good-to-have
+        Returns:
+            dict[str, int]: Mapping of field name to max list length, for whichever
+                fields have had `get_padding_length` called on them so far. Empty
+                dict if none have been computed yet.
+        """
+        return dict(getattr(self, "_padding_lengths", {}))
+
+    def set_padding_lengths(self, padding_lengths: dict[str, int]) -> None:
+        """Pre-seed the padding-length cache from externally-provided values
+        (e.g. loaded from a JSON file dumped during training), bypassing
+        recomputation. Use this at inference/test time to guarantee the same
+        padding scheme as training, rather than deriving it fresh from test data.
+        """
+        self._padding_lengths = dict(padding_lengths)
 
     def _check_if_all_columns_found(
         self,

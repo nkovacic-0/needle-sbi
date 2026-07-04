@@ -54,7 +54,13 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         self.weights_names = weights.fields
         self.weights_combine = weights_combine
 
-        self._compute_padding_lengths(self.feature_names)
+        # moved the explicit computation force (call) to datamodule level, into setup() method
+        # self._compute_padding_lengths(self.feature_names)
+
+        # temp addition of a debug/dump
+        # padding_lengths_path = '/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding_info_HTT_train.json'
+        # if padding_lengths_path is not None:
+        #     self.dump_padding_lengths(padding_lengths_path)
 
     def __iter__(self):
         """Iterate through partitions sequentially
@@ -82,17 +88,17 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
             labels_partition = load_partition(self.labels_ingestor.array, partition_id, slicing_index)
             weights_partition = load_partition(self.weights_ingestor.array, partition_id, slicing_index)
 
-            features_tensor = self.convert_ragged_to_tensor(
+            features_tensor = self.convert_ragged_ak_to_tensor(
                 features_partition.compute(), 
                 self.feature_names, 
                 self.features_ingestor
             )
-            labels_tensor = self.convert_flat_to_tensor(
+            labels_tensor = self.convert_flat_ak_to_tensor(
                 labels_partition.compute(), 
                 self.labels_names, 
                 self.labels_ingestor, reduce="stack"
             )
-            weights_tensor = self.convert_flat_to_tensor(
+            weights_tensor = self.convert_flat_ak_to_tensor(
                 weights_partition.compute(), 
                 self.weights_names, 
                 self.weights_ingestor, 

@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from typing import Literal
 from functools import partial
 
@@ -11,6 +13,11 @@ from needle.ml.datasets import PaddedDaskDataset, PaddedTorchDataset
 from needle.ml.datasets.kfold import KFold
 from needle.utils.config_schema import DatasetConfig
 
+# corresponds to the imports from needle.etl.normalization and maps them
+SCALER_REGISTRY = {
+    "standard": StandardScaler,
+    "minmax": MinMaxScaler,
+}
 
 class PaddedDataModule(L.LightningDataModule):
     def __init__(
@@ -23,6 +30,10 @@ class PaddedDataModule(L.LightningDataModule):
         multiprocessing_type: Literal["torch", "dask"] = "torch",
         shuffle_partitions: bool = True,
         shuffle_events: bool = True,
+        scaler_choice: Literal["standard", "minmax"] = "standard",
+        scaler_path: str | Path | None = None,
+        padding_lengths_path: str | Path | None = None,
+        force_resave_padding_scaler: bool = False,
     ) -> None:
         super().__init__()
         self.dataset_config = DatasetConfig(**dataset_config)
@@ -33,8 +44,14 @@ class PaddedDataModule(L.LightningDataModule):
         self.multiprocessing_type = multiprocessing_type
         self.shuffle_partitions = shuffle_partitions
         self.shuffle_events = shuffle_events
-        # TODO - make the choice of sclaer (and user defined scaler class) configurable
-        self.scaler = StandardScaler() #MinMaxScaler()
+        self.scaler_path = scaler_path
+        self.padding_lengths_path = padding_lengths_path
+        self.force_resave_padding_scaler = force_resave_padding_scaler
+
+        if scaler not in SCALER_REGISTRY:
+            raise ValueError(f"Unknown scaler '{scaler}'. Available: {list(SCALER_REGISTRY)}")
+        self.scaler_name = scaler
+        self.scaler = SCALER_REGISTRY[scaler]()
 
     def setup(self, stage: str | None = None) -> None:
         features = Ingestor(
@@ -59,14 +76,34 @@ class PaddedDataModule(L.LightningDataModule):
             max_number_events=self.dataset_config.max_number_events,
         )
         features.array = self.scaler.apply(features.array)
+        if self.scaler_path is not None:
+            path = resolve_versioned_path(self.scaler_path, self.fold_index, ".json", force=self.force_resave)
+            if path is not None:
+                self.scaler.save(path)
+
         # no need for normalization of labels and weights
-        # TODO - make this optional and configurable
         # labels.array = self.scaler.apply(labels.array)
         # weights.array = self.scaler.apply(weights.array)
 
         self.features = features
         self.labels = labels
         self.weights = weights
+
+        # Explicitly force padding-length computation here, once, rather than relying
+        # on it happening implicitly as a side effect of whichever Dataset subclass
+        # __init__ runs first (train or val). This also guarantees the dump below
+        # reflects a fully-populated cache regardless of which backend/dataloader
+        # gets constructed later, or in which order.
+        for field in features.fields:
+            features.get_padding_length(field)
+
+        # preserve the padding lengths
+        if self.padding_lengths_path is not None:
+            path = resolve_versioned_path(self.padding_lengths_path, self.fold_index, ".json", force=self.force_resave)
+            if path is not None:
+                padding_lengths = features.get_all_padding_lengths()   # from the previous fix
+                with path.open("w") as f:
+                    json.dump(padding_lengths, f, indent=2, sort_keys=True)
 
     @staticmethod
     def get_dataset(name: str):

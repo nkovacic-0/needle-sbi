@@ -8,6 +8,7 @@ padding.
 
 import logging
 import warnings
+from pathlib import Path
 from typing import Literal
 from abc import ABC, abstractmethod
 
@@ -41,7 +42,7 @@ class PaddedDatasetBase(Dataset, ABC):
     def __len__(self) -> int:
         return self.features_ingestor.length
 
-    def convert_ragged_to_tensor(self, array: ak.Array, fields: list[str], ingestor: Ingestor) -> torch.Tensor:
+    def convert_ragged_ak_to_tensor(self, array: ak.Array, fields: list[str], ingestor: Ingestor) -> torch.Tensor:
         # TODO - check that the docstring explains what is going on (I'm continuosly making code updates, but not docstring updates)
         """For per-particle (jagged) fields. Pads axis=1 to the precomputed global
         max length. Shape: (E, P, F).
@@ -60,7 +61,7 @@ class PaddedDatasetBase(Dataset, ABC):
         events = ak.concatenate(event_list, axis=-1)
         return torch.tensor(ak.to_numpy(events), dtype=torch.float32)
 
-    def convert_flat_to_tensor(
+    def convert_flat_ak_to_tensor(
         self, array: ak.Array, fields: list[str], ingestor: Ingestor, 
         reduce: Literal["stack", "product", "sum"] = "stack",
     ) -> torch.Tensor:
@@ -95,18 +96,84 @@ class PaddedDatasetBase(Dataset, ABC):
         #     )
         return torch.tensor(combined, dtype=torch.float32)
 
-
-    def _compute_padding_lengths(self, fields: list[str]) -> None:
-        """Trigger (and cache, via Ingestor) padding-length computation for ragged fields.
-        Delegates to `self.features_ingestor.get_padding_length`, which owns the actual
-        caching — shared across any Dataset instances built from the same Ingestor
-        (e.g. train/val), so this only pays the real computation cost once per run.
-        """
-        for field in fields:
-            self.features_ingestor.get_padding_length(field)
-
     def get_padding_length(self, field: str) -> int:
         return self.features_ingestor.get_padding_length(field)
+
+
+    # debug/bogde for bookkeeping of the padding info, TODO - remove this method once it is implemented in a cleaner way (?)
+    def dump_padding_lengths(self, path: str | Path) -> None:
+        """Write the currently cached per-field padding lengths to a JSON file.
+
+        Args:
+            path (str): Destination file path. Parent directories are created
+                if they don't exist. If the file already exists, it is overwritten.
+
+        Note:
+            Reads from `self.features_ingestor._padding_lengths`, which is only
+            populated once `_compute_padding_lengths` (or `get_padding_length`) has
+            actually been called for the relevant fields — call this after
+            `_compute_padding_lengths(self.feature_names)` in `__init__`, not before.
+        """
+        padding_lengths = getattr(self.features_ingestor, "_padding_lengths", None)
+        if not padding_lengths:
+            logger.warning(
+                "dump_padding_lengths called but no padding lengths are cached yet; "
+                "writing an empty file. Ensure _compute_padding_lengths ran first."
+            )
+            padding_lengths = {}
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as f:
+            json.dump(padding_lengths, f, indent=2, sort_keys=True)
+
+        logger.info(f"Wrote padding lengths for {len(padding_lengths)} field(s) to {path}")
+
+    @staticmethod
+    def add_innermost_dimension(array: ak.Array) -> ak.Array:
+        """Potentially add an inner dimension if the array is not 2D.
+
+        Works by trying to access the first element at axis 1. If that element
+        does not exist, add an inner dimension at axis 0 using ak.singletons().
+
+        Args:
+            array: ak.Array: The input data. If of shape (E, 1), nothing happens
+                and the original array is returned. If of shape (E,), an inner
+                dimension is added and the array is reshaped to (E, 1).
+
+        Returns:
+            ak.Array: The same array now shaped 2D (E, 1).
+
+        Example:
+            Case where the input array is 1D and needs an inner dimension added:
+            >>> print(PaddedEagerDataset.add_innermost_dimension([11, 52, 31]))
+            ak.Array([[11], [52], [31]])
+
+            Case where the input array is already 2D and nothing needs to be done:
+            >>> print(PaddedEagerDataset.add_innermost_dimension([[11], [52], [31]]))
+            ak.Array([[11], [52], [31]])
+        """
+        try:
+            _ = array[0][0]
+        except IndexError:
+            logger.debug("Added an extra dimension to the array at depth 0.")
+            array = ak.singletons(array, axis=0)
+        finally:
+            return array
+
+    
+
+    # NOTE: this is dead code, which delegates/esposes the intestor padding calculation at this class level
+    # it was used by _compute_padding_lengths calls in padded dask/torch's inits, but that cal forcing has 
+    # now been moved to padded_datamodule
+    # def _compute_padding_lengths(self, fields: list[str]) -> None:
+    #     """Trigger (and cache, via Ingestor) padding-length computation for ragged fields.
+    #     Delegates to `self.features_ingestor.get_padding_length`, which owns the actual
+    #     caching — shared across any Dataset instances built from the same Ingestor
+    #     (e.g. train/val), so this only pays the real computation cost once per run.
+    #     """
+    #     for field in fields:
+    #         self.features_ingestor.get_padding_length(field)
 
     # def _compute_padding_lengths(self, fields: list[str]) -> None:
     # # TODO - is this actually sane? i.e. I didn't see NEEDLE pre-computng the 
@@ -144,35 +211,3 @@ class PaddedDatasetBase(Dataset, ABC):
     #                 warnings.simplefilter("ignore")
     #                 length = _get_length()
     #         self._padding_lengths[field] = length
-
-    @staticmethod
-    def add_innermost_dimension(array: ak.Array) -> ak.Array:
-        """Potentially add an inner dimension if the array is not 2D.
-
-        Works by trying to access the first element at axis 1. If that element
-        does not exist, add an inner dimension at axis 0 using ak.singletons().
-
-        Args:
-            array: ak.Array: The input data. If of shape (E, 1), nothing happens
-                and the original array is returned. If of shape (E,), an inner
-                dimension is added and the array is reshaped to (E, 1).
-
-        Returns:
-            ak.Array: The same array now shaped 2D (E, 1).
-
-        Example:
-            Case where the input array is 1D and needs an inner dimension added:
-            >>> print(PaddedEagerDataset.add_innermost_dimension([11, 52, 31]))
-            ak.Array([[11], [52], [31]])
-
-            Case where the input array is already 2D and nothing needs to be done:
-            >>> print(PaddedEagerDataset.add_innermost_dimension([[11], [52], [31]]))
-            ak.Array([[11], [52], [31]])
-        """
-        try:
-            _ = array[0][0]
-        except IndexError:
-            logger.debug("Added an extra dimension to the array at depth 0.")
-            array = ak.singletons(array, axis=0)
-        finally:
-            return array

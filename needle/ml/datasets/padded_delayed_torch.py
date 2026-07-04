@@ -67,7 +67,13 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         self.labels_queue = PartitionQueue(labels.array)
         self.weights_queue = PartitionQueue(weights.array)
 
-        self._compute_padding_lengths(self.feature_names)
+        # moved the explicit computation force (call) to datamodule level, into setup() method
+        # self._compute_padding_lengths(self.feature_names)
+
+        # temp addition of a debug/dump
+        # padding_lengths_path = '/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding_info_HTT_train.json'
+        # if padding_lengths_path is not None:
+        #     self.dump_padding_lengths(padding_lengths_path)
 
     def __iter__(self):
         """Yields individual events from the dataset in after loading them in chunks.
@@ -118,17 +124,17 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
             labels_partition = self.labels_queue.load_partition_thread_safe(partition_id, slicing_index)
             weights_partition = self.weights_queue.load_partition_thread_safe(partition_id, slicing_index)
 
-            features_tensor = self.convert_ragged_to_tensor(
+            features_tensor = self.convert_ragged_ak_to_tensor(
                 features_partition.compute(), 
                 self.feature_names, 
                 self.features_ingestor
             )
-            labels_tensor = self.convert_flat_to_tensor(
+            labels_tensor = self.convert_flat_ak_to_tensor(
                 labels_partition.compute(), 
                 self.labels_names, 
                 self.labels_ingestor, reduce="stack"
             )
-            weights_tensor = self.convert_flat_to_tensor(
+            weights_tensor = self.convert_flat_ak_to_tensor(
                 weights_partition.compute(), 
                 self.weights_names, 
                 self.weights_ingestor, 
