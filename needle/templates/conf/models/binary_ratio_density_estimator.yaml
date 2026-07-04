@@ -49,7 +49,8 @@ transformer_model_configs:
   embedding_type: mlp
   embedding_hidden_layers: [64, 64]
   embedding_output_dim: 64
-  embedding_kwargs: {}
+  embedding_kwargs: #{}
+    dropout_prob: 0.1
     # # currently, only the mlp embedding is supported ()
     # # for activations: supported: whole nn.Module; nn.Module.activation; string
     # # activation_kwargs is only used if activation is set to a string or nn.Module.activation, 
@@ -103,13 +104,13 @@ transformer_model_configs:
     # for activations: supported: whole nn.Module; nn.Module.activation; string
     # activation_kwargs is only used if activation is set to a string or nn.Module.activation, 
     # they get directly unpacked into it
-    activation: relu
+    activation: swish
     activation_kwargs: {}
     # exactly the same applied for the output activation
     output_activation: null
     output_activation_kwargs: {}
     use_dropout: false
-    dropout_prob: 0.5
+    dropout_prob: 0.1
     # supported norms "batchnorm", "layernorm"
     # careful with batchnorm if using MLP for the embedding and withing the transf. blocks 
     normalization: null

@@ -1,3 +1,9 @@
 _target_: needle.ml.lightning.datamodules.padded_datamodule.PaddedDataModule
+
 multiprocessing_type: torch
 batch_size: 1024
+
+scaler_choice: standard
+scaler_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/sclaers/scaler_info_HTT_train.json
+padding_lengths_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding/padding_info_HTT_train.json
+force_resave_padding_scaler: True

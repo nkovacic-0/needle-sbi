@@ -20,7 +20,7 @@ estimators:
       #     trainer: default
       ensembles:
         num_ensembles: 1
-      folds: 1
+      folds: 2
 
 # downstream_tasks:
 #   downstream_A:  # name of this downstream Task

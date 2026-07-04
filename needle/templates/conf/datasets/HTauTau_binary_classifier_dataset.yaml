@@ -1,4 +1,4 @@
-paths: "/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/FAIR_Universe_HiggsML_data_ztautau_classification.parquet"
+paths: "/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/FAIR_Universe_HiggsML_data_metadata_ztautau_classification_FIXED_TRAIN.parquet"
 features_columns: [
   'PRI_lep_pt',
   'PRI_lep_eta',
@@ -20,6 +20,6 @@ features_columns: [
 format: parquet
 weights_columns: ["normalized_weight_ztautau_vs_others"]
 labels_columns: ["label_ztautau_vs_others"]
-#max_number_events: -1
-max_number_events: 1000000
+max_number_events: -1
+# max_number_events: 5000000
 weights_combine: product
