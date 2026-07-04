@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from typing import Literal
 from functools import partial
@@ -12,6 +13,12 @@ from needle.etl.normalization import MinMaxScaler, StandardScaler
 from needle.ml.datasets import PaddedDaskDataset, PaddedTorchDataset
 from needle.ml.datasets.kfold import KFold
 from needle.utils.config_schema import DatasetConfig
+
+# force logger to give us debug printouts for ML section
+from needle.utils.logging import ColorFormatter
+
+logger = ColorFormatter.get_logger("ml")
+logger.setLevel(logging.DEBUG) 
 
 # corresponds to the imports from needle.etl.normalization and maps them
 SCALER_REGISTRY = {
@@ -48,10 +55,10 @@ class PaddedDataModule(L.LightningDataModule):
         self.padding_lengths_path = padding_lengths_path
         self.force_resave_padding_scaler = force_resave_padding_scaler
 
-        if scaler not in SCALER_REGISTRY:
-            raise ValueError(f"Unknown scaler '{scaler}'. Available: {list(SCALER_REGISTRY)}")
-        self.scaler_name = scaler
-        self.scaler = SCALER_REGISTRY[scaler]()
+        if scaler_choice not in SCALER_REGISTRY:
+            raise ValueError(f"Unknown scaler '{scaler_choice}'. Available: {list(SCALER_REGISTRY)}")
+        self.scaler_name = scaler_choice
+        self.scaler = SCALER_REGISTRY[scaler_choice]()
 
     def setup(self, stage: str | None = None) -> None:
         features = Ingestor(
@@ -60,6 +67,7 @@ class PaddedDataModule(L.LightningDataModule):
             columns=self.dataset_config.features_columns,
             reader_kwargs=self.dataset_config.dak_reader_kwargs,
             max_number_events=self.dataset_config.max_number_events,
+            name="FeaturesIngestor",
         )
         labels = Ingestor(
             self.dataset_config.paths,
@@ -67,6 +75,7 @@ class PaddedDataModule(L.LightningDataModule):
             columns=self.dataset_config.labels_columns,
             reader_kwargs=self.dataset_config.dak_reader_kwargs,
             max_number_events=self.dataset_config.max_number_events,
+            name="LabelsIngestor",
         )
         weights = Ingestor(
             self.dataset_config.paths,
@@ -74,12 +83,18 @@ class PaddedDataModule(L.LightningDataModule):
             columns=self.dataset_config.weights_columns,
             reader_kwargs=self.dataset_config.dak_reader_kwargs,
             max_number_events=self.dataset_config.max_number_events,
+            name="WeightsIngestor",
         )
+        logger.info(f"Applying scaler ({self.scaler_name}) to features...")
         features.array = self.scaler.apply(features.array)
         if self.scaler_path is not None:
             path = resolve_versioned_path(self.scaler_path, self.fold_index, ".json", force=self.force_resave)
             if path is not None:
                 self.scaler.save(path)
+        if path is not None:
+            logger.info(f"Scaler applied and saved to {path}")
+        else:
+            logger.info("Scaler applied.")
 
         # no need for normalization of labels and weights
         # labels.array = self.scaler.apply(labels.array)
@@ -94,6 +109,7 @@ class PaddedDataModule(L.LightningDataModule):
         # __init__ runs first (train or val). This also guarantees the dump below
         # reflects a fully-populated cache regardless of which backend/dataloader
         # gets constructed later, or in which order.
+        logger.info("Computing padding lengths for all feature fields...")
         for field in features.fields:
             features.get_padding_length(field)
 
@@ -104,6 +120,10 @@ class PaddedDataModule(L.LightningDataModule):
                 padding_lengths = features.get_all_padding_lengths()   # from the previous fix
                 with path.open("w") as f:
                     json.dump(padding_lengths, f, indent=2, sort_keys=True)
+        if path is not None:
+            logger.info(f"Padding lengths computed and saved to {path}")
+        else:
+            logger.info("Padding lengths computed.")  
 
     @staticmethod
     def get_dataset(name: str):

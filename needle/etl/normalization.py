@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
+import dask 
 import awkward as ak
 import dask_awkward as dak
 import pyarrow.parquet as pq
@@ -206,11 +207,14 @@ class MinMaxScaler(ScalerProtocol):
 
     def _transform(self, array: dak.Array, fit: bool) -> dak.Array:
         fields = NestedArrayIndexer.list_all_fields(array, as_tuple=False, separator=".")
+        logger.debug(f"Scaler processing {len(fields)} field(s): {fields}")
 
-        for field in fields:
+        for i, field in enumerate(fields):
+            logger.debug(f"[{i+1}/{len(fields)}] Fitting scaler for field '{field}'...")
             column = NestedArrayIndexer.get_nested_field(array, field, separator=".")
 
             if fit:
+                # TODO: move the two computes here into a single compute call
                 minimum = ak.min(column.compute())
                 maximum = ak.max(column.compute())
                 self.cache["min"][field] = minimum
@@ -221,6 +225,7 @@ class MinMaxScaler(ScalerProtocol):
 
             normalized = (column - minimum) / (maximum - minimum)
             array = ak.with_field(array, normalized, where=tuple(field.split(".")))
+            logger.debug(f"[{i+1}/{len(fields)}] Comlete, done with field '{field}'.")
 
         return array
 
@@ -281,13 +286,29 @@ class StandardScaler(ScalerProtocol):
 
     def _transform(self, array: dak.Array, fit: bool) -> dak.Array:
         fields = NestedArrayIndexer.list_all_fields(array, as_tuple=False, separator=".")
+        logger.debug(f"Scaler processing {len(fields)} field(s): {fields}")
 
-        for field in fields:
+        for i, field in enumerate(fields):
+            logger.debug(f"[{i+1}/{len(fields)}] Fitting scaler for field '{field}'...")
             column = NestedArrayIndexer.get_nested_field(array, field, separator=".")
 
             if fit:
-                mean = ak.mean(column.compute())
-                std = ak.std(column.compute())
+                # mean = ak.mean(column.compute())
+                # std = ak.std(column.compute())
+                # let's try putting both of these computes into one call:
+                # NOTE: annoyingly, the ak.mean lazy is not supported by dask - it is literally left as TODO in dask awkward source! 
+                # mean_lazy = ak.mean(column)
+                # std_lazy = ak.std(column)
+                # mean, std = dask.compute(mean_lazy, std_lazy)
+                # for the reason above, we gotta do the mean/std lazy calc "manually":
+                n = ak.count(column)
+                total = ak.sum(column)
+                total_sq = ak.sum(column ** 2)
+                n_val, total_val, total_sq_val = dask.compute(n, total, total_sq)
+
+                mean = total_val / n_val
+                std = ((total_sq_val / n_val) - (mean ** 2))**0.5
+                
                 self.cache["mean"][field] = mean
                 self.cache["std"][field] = std
             else:
@@ -296,6 +317,7 @@ class StandardScaler(ScalerProtocol):
 
             normalized = (column - mean) / std
             array = ak.with_field(array, normalized, where=tuple(field.split(".")))
+            logger.debug(f"[{i+1}/{len(fields)}] Comlete, done with field '{field}'.")
 
         return array
 

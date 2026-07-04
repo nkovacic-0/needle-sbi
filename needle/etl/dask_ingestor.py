@@ -65,6 +65,7 @@ class Ingestor:
         columns: str | list[str] | None = None,
         reader_kwargs: dict[str, Any] | None = None,
         max_number_events: int = -1,
+        name: str = "unnamed",
     ) -> None:
         """
         Read any input file and return an instance of this class.
@@ -83,18 +84,30 @@ class Ingestor:
         """
         paths = [paths] if isinstance(paths, str) else paths
         self.paths = paths 
+        self.name = name
         columns = [columns] if isinstance(columns, str) else columns
+        logger.debug(f"[{self.name}] Resolving format for paths: {reprlib.repr(paths)}")
         format = self._resolve_format(format, paths[0])  # type: ignore
+        logger.debug(f"[{self.name}] Resolved format: {format}")
+
         reader_kwargs = reader_kwargs or {}
 
         match format:
             case "parquet":
+                logger.debug(f"[{self.name}] Building lazy dak.Array via dak.from_parquet...")
                 self.array = dak.from_parquet(paths, columns=columns, **reader_kwargs)  # type: ignore
             case "root":
+                logger.debug(f"[{self.name}] Building lazy dak.Array via uproot.dask...")
                 self.array = uproot.dask(paths, columns=columns, **reader_kwargs)  # type: ignore
+        logger.debug(f"[{self.name}] Lazy array constructed.")
 
+        logger.debug(f"[{self.name}] Calling eager_compute_divisions()...")
         self.array.eager_compute_divisions()  # type: ignore
+        logger.debug(f"[{self.name}] eager_compute_divisions() done.")
+
+        logger.debug(f"[{self.name}] Running _inspect_array()...")
         self._inspect_array(self.array, paths)
+        logger.debug(f"[{self.name}] _inspect_array() done.")
 
         loaded_columns = NestedArrayIndexer.list_all_fields(self.array, separator=self.SEPARATOR, as_tuple=False)
 
@@ -105,7 +118,9 @@ class Ingestor:
         if max_number_events > 0:
             self.array = self.array[0:max_number_events]
 
+        logger.debug(f"[{self.name}] Computing length via _get_length()...")
         self.length = self._get_length(self[self.fields[0]], paths)
+        logger.debug(f"[{self.name}] _get_length() done: {self.length}")
 
         logger.info(f"Loaded {self.length} events with {self.num_classes} column(s): {reprlib.repr(self.fields)}")
         return None
@@ -174,6 +189,7 @@ class Ingestor:
             self._padding_lengths = {}
 
         if field not in self._padding_lengths:
+            logger.info(f"[{self.name}] Computing padding length for field '{field}' (method={method})...")
             if method == "dask":
                 try:
                     length = self._get_padding_length_dask(field)
@@ -187,7 +203,7 @@ class Ingestor:
                 length = brute_force_max_list_length(resolve_paths(self.paths), field)
             else:
                 raise ValueError(f"Unknown method: {method}")
-
+            logger.info(f"[{self.name}] Padding length for '{field}': {length}")
             self._padding_lengths[field] = length
 
         return self._padding_lengths[field]
