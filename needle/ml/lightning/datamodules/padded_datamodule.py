@@ -9,10 +9,11 @@ import lightning as L
 from torch.utils.data import DataLoader
 
 from needle.etl.dask_ingestor import Ingestor
-from needle.etl.normalization import MinMaxScaler, StandardScaler
+from needle.etl.normalization import MinMaxScaler, StandardScaler, load_scaler
 from needle.ml.datasets import PaddedDaskDataset, PaddedTorchDataset
 from needle.ml.datasets.kfold import KFold
 from needle.utils.config_schema import DatasetConfig
+from needle.ml.lightning.datamodules.datamodule_utils import resolve_versioned_path
 
 # force logger to give us debug printouts for ML section
 from needle.utils.logging import ColorFormatter
@@ -37,10 +38,19 @@ class PaddedDataModule(L.LightningDataModule):
         multiprocessing_type: Literal["torch", "dask"] = "torch",
         shuffle_partitions: bool = True,
         shuffle_events: bool = True,
-        scaler_choice: Literal["standard", "minmax"] = "standard",
-        scaler_path: str | Path | None = None,
+        # path to save padding info to, has to be a full path
         padding_lengths_path: str | Path | None = None,
+        # path where to load padding from
+        padding_lengths_load_path: str | Path | None = None,
+        # variables determining scaler behaviour
+        scaler_choice: Literal["standard", "minmax"] = "standard", # this is irrelevant if scaler_load_path != None
+        scaler_path: str | Path | None = None, # full filepath to save scalers to
+        scaler_load_path: str | Path | None = None, # full filepath to load scalers from
         force_resave_padding_scaler: bool = False,
+        scaler_use_sampling: bool = False,
+        scaler_sample_fraction: float = 0.10,
+        # forces new saves of padding and scalers to new files, if the originally targeted file exists
+        force_avoid_partition_sampling: bool = True, 
     ) -> None:
         super().__init__()
         self.dataset_config = DatasetConfig(**dataset_config)
@@ -51,14 +61,21 @@ class PaddedDataModule(L.LightningDataModule):
         self.multiprocessing_type = multiprocessing_type
         self.shuffle_partitions = shuffle_partitions
         self.shuffle_events = shuffle_events
-        self.scaler_path = scaler_path
         self.padding_lengths_path = padding_lengths_path
+        self.padding_lengths_load_path = padding_lengths_load_path
+
         self.force_resave_padding_scaler = force_resave_padding_scaler
 
-        if scaler_choice not in SCALER_REGISTRY:
-            raise ValueError(f"Unknown scaler '{scaler_choice}'. Available: {list(SCALER_REGISTRY)}")
-        self.scaler_name = scaler_choice
-        self.scaler = SCALER_REGISTRY[scaler_choice]()
+        self.scaler_path = scaler_path
+        self.scaler_load_path = scaler_load_path
+        if scaler_load_path is not None:
+            if scaler_choice not in SCALER_REGISTRY:
+                raise ValueError(f"Unknown scaler '{scaler_choice}'. Available: {list(SCALER_REGISTRY)}")
+            self.scaler_name = scaler_choice
+            self.scaler = SCALER_REGISTRY[scaler_choice]()
+            self.scaler_use_sampling = scaler_use_sampling
+            self.scaler_sample_fraction = scaler_sample_fraction
+            self.force_avoid_partition_sampling = force_avoid_partition_sampling
 
     def setup(self, stage: str | None = None) -> None:
         features = Ingestor(
@@ -85,16 +102,29 @@ class PaddedDataModule(L.LightningDataModule):
             max_number_events=self.dataset_config.max_number_events,
             name="WeightsIngestor",
         )
-        logger.info(f"Applying scaler ({self.scaler_name}) to features...")
-        features.array = self.scaler.apply(features.array)
-        if self.scaler_path is not None:
-            path = resolve_versioned_path(self.scaler_path, self.fold_index, ".json", force=self.force_resave)
-            if path is not None:
-                self.scaler.save(path)
-        if path is not None:
-            logger.info(f"Scaler applied and saved to {path}")
+        # Scaler handling: load pre-fitted statistics, or fit fresh
+        if self.scaler_load_path is not None:
+            logger.info(f"Loading pre-fitted scaler from {self.scaler_load_path}...")
+            self.scaler = load_scaler(self.scaler_load_path)   # auto-detects StandardScaler/MinMaxScaler
+            if type(self.scaler).__name__.lower().replace("scaler", "") != self.scaler_name:  # rough check
+                logger.warning(f"scaler_choice='{self.scaler_name}' is being ignored, loaded {type(loaded).__name__} from disk instead.")
+            self.scaler_name = type(self.scaler).__name__
+            features.array = self.scaler.apply_with_cache(features.array, self.scaler.cache)
+            logger.info(f"Scaler loaded and applied ({self.scaler_name}).")
         else:
-            logger.info("Scaler applied.")
+            logger.info(f"Applying scaler ({self.scaler_name}) to features...")
+            features.array = self.scaler.apply(
+                features.array,
+                use_sampling=self.scaler_use_sampling,
+                sample_fraction=self.scaler_sample_fraction,
+                force_avoid_partition_sampling=self.force_avoid_partition_sampling,
+            )
+            path = None
+            if self.scaler_path is not None:
+                path = resolve_versioned_path(self.scaler_path, self.fold_index, ".json", force=self.force_resave_padding_scaler)
+                if path is not None:
+                    self.scaler.save(path)
+            logger.info(f"Scaler applied{f' and saved to {path}' if path is not None else ''}.")
 
         # no need for normalization of labels and weights
         # labels.array = self.scaler.apply(labels.array)
@@ -104,26 +134,33 @@ class PaddedDataModule(L.LightningDataModule):
         self.labels = labels
         self.weights = weights
 
-        # Explicitly force padding-length computation here, once, rather than relying
-        # on it happening implicitly as a side effect of whichever Dataset subclass
-        # __init__ runs first (train or val). This also guarantees the dump below
-        # reflects a fully-populated cache regardless of which backend/dataloader
-        # gets constructed later, or in which order.
-        logger.info("Computing padding lengths for all feature fields...")
-        for field in features.fields:
-            features.get_padding_length(field)
 
-        # preserve the padding lengths
-        if self.padding_lengths_path is not None:
-            path = resolve_versioned_path(self.padding_lengths_path, self.fold_index, ".json", force=self.force_resave)
-            if path is not None:
-                padding_lengths = features.get_all_padding_lengths()   # from the previous fix
-                with path.open("w") as f:
-                    json.dump(padding_lengths, f, indent=2, sort_keys=True)
-        if path is not None:
-            logger.info(f"Padding lengths computed and saved to {path}")
+        # Padding (lengths) handling: load pre-computed values, or compute fresh
+        if self.padding_lengths_load_path is not None:
+            logger.info(f"Loading pre-computed padding lengths from {self.padding_lengths_load_path}...")
+            with open(self.padding_lengths_load_path) as f:
+                saved_lengths = json.load(f)
+            features.set_padding_lengths(saved_lengths)
+            logger.info(f"Padding lengths loaded: {saved_lengths}")
         else:
-            logger.info("Padding lengths computed.")  
+            # Explicitly force padding-length computation here, once, rather than relying
+            # on it happening implicitly as a side effect of whichever Dataset subclass
+            # __init__ runs first (train or val). This also guarantees the dump below
+            # reflects a fully-populated cache regardless of which backend/dataloader
+            # gets constructed later, or in which order.
+            logger.info("Computing padding lengths for all feature fields...")
+            for field in features.fields:
+                features.get_padding_length(field)
+
+            path = None
+            if self.padding_lengths_path is not None:
+                path = resolve_versioned_path(self.padding_lengths_path, self.fold_index, ".json", force=self.force_resave_padding_scaler)
+                if path is not None:
+                    padding_lengths = features.get_all_padding_lengths()
+                    with path.open("w") as f:
+                        json.dump(padding_lengths, f, indent=2, sort_keys=True)
+            logger.info(f"Padding lengths computed{f' and saved to {path}' if path is not None else ''}.")
+
 
     @staticmethod
     def get_dataset(name: str):

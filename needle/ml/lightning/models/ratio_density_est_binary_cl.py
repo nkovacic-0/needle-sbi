@@ -128,7 +128,7 @@ class RatioDensityEstimatorBinary(L.LightningModule):
 
         output = self(x, cond_x=cond_x)
 
-        # i our labels only have 1 dim, we can just unwrap dict{str: torch.tensor} with the util function
+        # here, our labels only have 1 dim, we can just unwrap dict{str: torch.tensor} with the util function
         labels = unwrap_labels(labels)
         # output: (B, 1), labels: (B,) or (B, 1) — align shapes for BCEWithLogitsLoss
         output = output.squeeze(-1)
@@ -144,6 +144,7 @@ class RatioDensityEstimatorBinary(L.LightningModule):
             loss = loss.mean()
 
         # not sure if this is needed w.r.t. NEEDLE custom training imlementation? - TODO
+        # this is making use of hte inherited L model own logging...
         self.log(f"{stage}_loss", loss, on_step=(stage == "train"), on_epoch=True, prog_bar=True)
         return loss
 
