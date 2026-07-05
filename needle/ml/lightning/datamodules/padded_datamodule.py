@@ -39,12 +39,12 @@ class PaddedDataModule(L.LightningDataModule):
         shuffle_partitions: bool = True,
         shuffle_events: bool = True,
         # path to save padding info to, has to be a full path
-        padding_lengths_path: str | Path | None = None,
+        padding_lengths_save_path: str | Path | None = None,
         # path where to load padding from
         padding_lengths_load_path: str | Path | None = None,
         # variables determining scaler behaviour
         scaler_choice: Literal["standard", "minmax"] = "standard", # this is irrelevant if scaler_load_path != None
-        scaler_path: str | Path | None = None, # full filepath to save scalers to
+        scaler_save_path: str | Path | None = None, # full filepath to save scalers to
         scaler_load_path: str | Path | None = None, # full filepath to load scalers from
         force_resave_padding_scaler: bool = False,
         scaler_use_sampling: bool = False,
@@ -61,21 +61,20 @@ class PaddedDataModule(L.LightningDataModule):
         self.multiprocessing_type = multiprocessing_type
         self.shuffle_partitions = shuffle_partitions
         self.shuffle_events = shuffle_events
-        self.padding_lengths_path = padding_lengths_path
+        self.padding_lengths_save_path = padding_lengths_save_path
         self.padding_lengths_load_path = padding_lengths_load_path
 
         self.force_resave_padding_scaler = force_resave_padding_scaler
 
-        self.scaler_path = scaler_path
+        self.scaler_save_path = scaler_save_path
         self.scaler_load_path = scaler_load_path
-        if scaler_load_path is not None:
-            if scaler_choice not in SCALER_REGISTRY:
-                raise ValueError(f"Unknown scaler '{scaler_choice}'. Available: {list(SCALER_REGISTRY)}")
-            self.scaler_name = scaler_choice
-            self.scaler = SCALER_REGISTRY[scaler_choice]()
-            self.scaler_use_sampling = scaler_use_sampling
-            self.scaler_sample_fraction = scaler_sample_fraction
-            self.force_avoid_partition_sampling = force_avoid_partition_sampling
+        self.scaler_name = scaler_choice
+        if scaler_choice not in SCALER_REGISTRY:
+            raise ValueError(f"Unknown scaler '{scaler_choice}'. Available: {list(SCALER_REGISTRY)}")
+        self.scaler = SCALER_REGISTRY[scaler_choice]()
+        self.scaler_use_sampling = scaler_use_sampling
+        self.scaler_sample_fraction = scaler_sample_fraction
+        self.force_avoid_partition_sampling = force_avoid_partition_sampling
 
     def setup(self, stage: str | None = None) -> None:
         features = Ingestor(
@@ -120,8 +119,8 @@ class PaddedDataModule(L.LightningDataModule):
                 force_avoid_partition_sampling=self.force_avoid_partition_sampling,
             )
             path = None
-            if self.scaler_path is not None:
-                path = resolve_versioned_path(self.scaler_path, self.fold_index, ".json", force=self.force_resave_padding_scaler)
+            if self.scaler_save_path is not None:
+                path = resolve_versioned_path(self.scaler_save_path, self.fold_index, ".json", force=self.force_resave_padding_scaler)
                 if path is not None:
                     self.scaler.save(path)
             logger.info(f"Scaler applied{f' and saved to {path}' if path is not None else ''}.")
@@ -149,12 +148,18 @@ class PaddedDataModule(L.LightningDataModule):
             # reflects a fully-populated cache regardless of which backend/dataloader
             # gets constructed later, or in which order.
             logger.info("Computing padding lengths for all feature fields...")
-            for field in features.fields:
-                features.get_padding_length(field)
+            # try using the paralel compute_all_padding_lengths, if it fails revert to serial operation get_padding_length
+            # where get_padding_length should have its own pyarrow fallback
+            try:
+                features.compute_all_padding_lengths(features.fields)
+            except Exception as e:
+                logger.warning(f"Batched padding-length computation failed ({e!r}); falling back to sequential per-field method.")
+                for field in features.fields:
+                    features.get_padding_length(field)
 
             path = None
-            if self.padding_lengths_path is not None:
-                path = resolve_versioned_path(self.padding_lengths_path, self.fold_index, ".json", force=self.force_resave_padding_scaler)
+            if self.padding_lengths_save_path is not None:
+                path = resolve_versioned_path(self.padding_lengths_save_path, self.fold_index, ".json", force=self.force_resave_padding_scaler)
                 if path is not None:
                     padding_lengths = features.get_all_padding_lengths()
                     with path.open("w") as f:

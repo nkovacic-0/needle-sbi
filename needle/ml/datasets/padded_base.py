@@ -79,7 +79,12 @@ class PaddedDatasetBase(Dataset, ABC):
                     f"NaN count = {is_nan.sum().item()} / {test_tensor.numel()}, "
                     f"tensor sample (first event) = {test_tensor[0]}"
                 )
+                # ============ END TEMP DEBUG BODGE ============
 
+        events = ak.concatenate(event_list, axis=-1)
+        tensor = torch.tensor(ak.to_numpy(events), dtype=torch.float32)
+
+         # ============ TEMP DEBUG BODGE — block 2
         if not getattr(self, "_padding_debug_done", False):
             overall_nan_check = torch.isnan(tensor)
             logger.warning(
@@ -89,10 +94,7 @@ class PaddedDatasetBase(Dataset, ABC):
             )
             self._padding_debug_done = True  # only spam this once per Dataset instance
         # ============ END TEMP DEBUG BODGE ============
-
-
-        events = ak.concatenate(event_list, axis=-1)
-        return torch.tensor(ak.to_numpy(events), dtype=torch.float32)
+        return tensor
 
     def convert_flat_ak_to_tensor(
         self, array: ak.Array, fields: list[str], ingestor: Ingestor, 

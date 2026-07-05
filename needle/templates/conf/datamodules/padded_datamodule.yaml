@@ -4,13 +4,17 @@ multiprocessing_type: torch
 batch_size: 1024
 
 scaler_choice: standard
-scaler_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/sclaers/scaler_info_HTT_train.json
-padding_lengths_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding/padding_info_HTT_train.json
+scaler_save_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/scalers/full_scaler_info_HTT_train.json
+padding_lengths_save_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding/full_padding_info_HTT_train.json
 force_resave_padding_scaler: True
 
 scaler_use_sampling: False
 scaler_sample_fraction: 0.10
 force_avoid_partition_sampling: True
 
-padding_lengths_load_path: null
-scaler_load_path: null
+# set these paths to null to recalcualte scaling/padding
+# scaler_load_path: null
+# padding_lengths_load_path: null
+
+scaler_load_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/sclaers/full_scaler_info_HTT_train_0.json
+padding_lengths_load_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding/full_padding_info_HTT_train_0_a1b0irs2.json

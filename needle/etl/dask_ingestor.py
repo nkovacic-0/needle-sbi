@@ -144,6 +144,26 @@ class Ingestor:
 
         return NestedArrayIndexer.get_nested_field(self.array, field, self.SEPARATOR)
 
+    # parallel alternative to 'get_padding_length'
+    def compute_all_padding_lengths(self, fields: list[str]) -> dict[str, int]:
+        """Compute padding lengths for multiple fields in a single batched dask.compute()
+        call, rather than one sequential .compute() per field.
+        """
+        lazy_lengths = {}
+        for field in fields:
+            column = NestedArrayIndexer.get_nested_field(self.array, field, self.SEPARATOR)
+            column = self._ensure_2d(column)
+            lazy_lengths[field] = ak.max(ak.ravel(ak.num(column, axis=1)))
+
+        logger.debug(f"[{self.name}] Computing padding lengths for {len(fields)} field(s) in one batched call...")
+        computed = dask.compute(*lazy_lengths.values())
+        results = dict(zip(lazy_lengths.keys(), (int(v) for v in computed)))
+
+        if not hasattr(self, "_padding_lengths"):
+            self._padding_lengths = {}
+        self._padding_lengths.update(results)
+        return results
+
     # # TODO - test and validate this alternate padding calculation!
     # def get_padding_length(self, field: str, method: Literal["dask", "pyarrow"] = "dask") -> int:
     #     """Compute (and cache) the max per-event list length for a ragged field.
@@ -189,7 +209,7 @@ class Ingestor:
             self._padding_lengths = {}
 
         if field not in self._padding_lengths:
-            logger.info(f"[{self.name}] Computing padding length for field '{field}' (method={method})...")
+            logger.debug(f"[{self.name}] Computing padding length for field '{field}' (method={method})...")
             if method == "dask":
                 try:
                     length = self._get_padding_length_dask(field)
@@ -203,7 +223,7 @@ class Ingestor:
                 length = brute_force_max_list_length(resolve_paths(self.paths), field)
             else:
                 raise ValueError(f"Unknown method: {method}")
-            logger.info(f"[{self.name}] Padding length for '{field}': {length}")
+            logger.debug(f"[{self.name}] Padding length for '{field}': {length}")
             self._padding_lengths[field] = length
 
         return self._padding_lengths[field]
