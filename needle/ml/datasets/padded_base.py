@@ -58,6 +58,39 @@ class PaddedDatasetBase(Dataset, ABC):
             column = self.add_innermost_dimension(column)
             padded = ak.pad_none(column, axis=1, target=self.get_padding_length(field), clip=True)
             event_list.append(padded[..., np.newaxis])
+
+            # ============ TEMP DEBUG BODGE — gotta check the actual state of padding TODO - remove after testing!
+            if not getattr(self, "_padding_debug_done", False):
+                sample_list = ak.to_list(padded[:3])
+                logger.warning(f"[PADDING DEBUG] field='{field}' first 3 events (raw, pre-numpy): {sample_list}")
+
+                numeric = ak.to_numpy(padded, allow_missing=True)
+                logger.warning(f"[PADDING DEBUG] field='{field}' ak.to_numpy() result type: {type(numeric)}")
+                if hasattr(numeric, "fill_value"):
+                    logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.fill_value: {numeric.fill_value}")
+                    logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.data sample (first event): {numeric.data[0]}")
+                    logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.mask sample (first event): {numeric.mask[0] if numeric.mask is not np.ma.nomask else 'no mask (nomask)'}")
+
+                test_tensor = torch.tensor(np.asarray(numeric), dtype=torch.float32)
+                is_nan = torch.isnan(test_tensor)
+                logger.warning(
+                    f"[PADDING DEBUG] field='{field}' resulting tensor: "
+                    f"any NaN present = {is_nan.any().item()}, "
+                    f"NaN count = {is_nan.sum().item()} / {test_tensor.numel()}, "
+                    f"tensor sample (first event) = {test_tensor[0]}"
+                )
+
+        if not getattr(self, "_padding_debug_done", False):
+            overall_nan_check = torch.isnan(tensor)
+            logger.warning(
+                f"[PADDING DEBUG] FINAL combined tensor shape={tuple(tensor.shape)}, "
+                f"any NaN = {overall_nan_check.any().item()}, "
+                f"NaN fraction = {overall_nan_check.float().mean().item():.4f}"
+            )
+            self._padding_debug_done = True  # only spam this once per Dataset instance
+        # ============ END TEMP DEBUG BODGE ============
+
+
         events = ak.concatenate(event_list, axis=-1)
         return torch.tensor(ak.to_numpy(events), dtype=torch.float32)
 
@@ -99,35 +132,6 @@ class PaddedDatasetBase(Dataset, ABC):
     def get_padding_length(self, field: str) -> int:
         return self.features_ingestor.get_padding_length(field)
 
-
-    # debug/bogde for bookkeeping of the padding info, TODO - remove this method once it is implemented in a cleaner way (?)
-    def dump_padding_lengths(self, path: str | Path) -> None:
-        """Write the currently cached per-field padding lengths to a JSON file.
-
-        Args:
-            path (str): Destination file path. Parent directories are created
-                if they don't exist. If the file already exists, it is overwritten.
-
-        Note:
-            Reads from `self.features_ingestor._padding_lengths`, which is only
-            populated once `_compute_padding_lengths` (or `get_padding_length`) has
-            actually been called for the relevant fields — call this after
-            `_compute_padding_lengths(self.feature_names)` in `__init__`, not before.
-        """
-        padding_lengths = getattr(self.features_ingestor, "_padding_lengths", None)
-        if not padding_lengths:
-            logger.warning(
-                "dump_padding_lengths called but no padding lengths are cached yet; "
-                "writing an empty file. Ensure _compute_padding_lengths ran first."
-            )
-            padding_lengths = {}
-
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w") as f:
-            json.dump(padding_lengths, f, indent=2, sort_keys=True)
-
-        logger.info(f"Wrote padding lengths for {len(padding_lengths)} field(s) to {path}")
 
     @staticmethod
     def add_innermost_dimension(array: ak.Array) -> ak.Array:
