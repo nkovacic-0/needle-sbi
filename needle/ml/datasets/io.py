@@ -51,10 +51,10 @@ class PartitionQueue:
     # NOTE: TODO: this dask.config.set was hard coded into the class declaration before
     # no idea why it was put in, but it could be a bogde so that the num or dask workers doesn't explode
     # I'll comment it out but it needs to be clarified/documented.
-    dask.config.set(  # type: ignore
-        scheduler="single-threaded",
-        num_workers=1,
-    )
+    # dask.config.set(  # type: ignore
+    #     scheduler="single-threaded",
+    #     num_workers=1,
+    # )
 
     array: dak.Array  # type: ignore
     total_num_partitions: int
