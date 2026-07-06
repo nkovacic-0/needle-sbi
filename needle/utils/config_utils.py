@@ -14,7 +14,8 @@ from pytorch_lightning import LightningDataModule as LegacyDataModule
 from pytorch_lightning import LightningModule as LegacyModule
 from pytorch_lightning import Trainer as LegacyTrainer
 
-from needle.utils.config_schema import MainConfig
+from needle.utils.config_schema import MainConfig, DatasetConfig
+
 from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("config")
@@ -155,7 +156,20 @@ def resolve_defaults(
 
             if base_cfg:
                 if override_key == "dataset_override":
-                    est_cfg[override_key] = OmegaConf.merge(base_cfg, group_cfg)
+                    base_dict = OmegaConf.to_container(base_cfg, resolve=False)
+                    # remove default placeholders so they don't override actual params
+                    base_dict = {
+                        k: v for k, v in base_dict.items()
+                        if v not in ("", [], None)
+                    }
+                    est_cfg[override_key] = OmegaConf.merge(
+                        OmegaConf.structured(DatasetConfig),
+                        OmegaConf.merge(group_cfg, OmegaConf.create(base_dict))
+                    )
+                    # this line causes a crash if dak_reader_kwargs is filled in dataset_config!
+                    # the current fix is above. TODO - confirm that the fix will work in all needle use cases
+                    # est_cfg[override_key] = OmegaConf.merge(base_cfg, group_cfg)
+                    print(OmegaConf.to_yaml(est_cfg))
                 else:
                     base_dict = OmegaConf.to_container(base_cfg, resolve=False)
                     group_dict = OmegaConf.to_container(group_cfg, resolve=False)
