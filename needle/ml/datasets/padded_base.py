@@ -60,39 +60,39 @@ class PaddedDatasetBase(Dataset, ABC):
             event_list.append(padded[..., np.newaxis])
 
             # ============ TEMP DEBUG BODGE — gotta check the actual state of padding TODO - remove after testing!
-            if not getattr(self, "_padding_debug_done", False):
-                sample_list = ak.to_list(padded[:3])
-                logger.warning(f"[PADDING DEBUG] field='{field}' first 3 events (raw, pre-numpy): {sample_list}")
+            # if not getattr(self, "_padding_debug_done", False):
+            #     sample_list = ak.to_list(padded[:3])
+            #     logger.warning(f"[PADDING DEBUG] field='{field}' first 3 events (raw, pre-numpy): {sample_list}")
 
-                numeric = ak.to_numpy(padded, allow_missing=True)
-                logger.warning(f"[PADDING DEBUG] field='{field}' ak.to_numpy() result type: {type(numeric)}")
-                if hasattr(numeric, "fill_value"):
-                    logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.fill_value: {numeric.fill_value}")
-                    logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.data sample (first event): {numeric.data[0]}")
-                    logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.mask sample (first event): {numeric.mask[0] if numeric.mask is not np.ma.nomask else 'no mask (nomask)'}")
+            #     numeric = ak.to_numpy(padded, allow_missing=True)
+            #     logger.warning(f"[PADDING DEBUG] field='{field}' ak.to_numpy() result type: {type(numeric)}")
+            #     if hasattr(numeric, "fill_value"):
+            #         logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.fill_value: {numeric.fill_value}")
+            #         logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.data sample (first event): {numeric.data[0]}")
+            #         logger.warning(f"[PADDING DEBUG] field='{field}' MaskedArray.mask sample (first event): {numeric.mask[0] if numeric.mask is not np.ma.nomask else 'no mask (nomask)'}")
 
-                test_tensor = torch.tensor(np.asarray(numeric), dtype=torch.float32)
-                is_nan = torch.isnan(test_tensor)
-                logger.warning(
-                    f"[PADDING DEBUG] field='{field}' resulting tensor: "
-                    f"any NaN present = {is_nan.any().item()}, "
-                    f"NaN count = {is_nan.sum().item()} / {test_tensor.numel()}, "
-                    f"tensor sample (first event) = {test_tensor[0]}"
-                )
+            #     test_tensor = torch.tensor(np.asarray(numeric), dtype=torch.float32)
+            #     is_nan = torch.isnan(test_tensor)
+            #     logger.warning(
+            #         f"[PADDING DEBUG] field='{field}' resulting tensor: "
+            #         f"any NaN present = {is_nan.any().item()}, "
+            #         f"NaN count = {is_nan.sum().item()} / {test_tensor.numel()}, "
+            #         f"tensor sample (first event) = {test_tensor[0]}"
+            #     )
                 # ============ END TEMP DEBUG BODGE ============
 
         events = ak.concatenate(event_list, axis=-1)
         tensor = torch.tensor(ak.to_numpy(events), dtype=torch.float32)
 
          # ============ TEMP DEBUG BODGE — block 2
-        if not getattr(self, "_padding_debug_done", False):
-            overall_nan_check = torch.isnan(tensor)
-            logger.warning(
-                f"[PADDING DEBUG] FINAL combined tensor shape={tuple(tensor.shape)}, "
-                f"any NaN = {overall_nan_check.any().item()}, "
-                f"NaN fraction = {overall_nan_check.float().mean().item():.4f}"
-            )
-            self._padding_debug_done = True  # only spam this once per Dataset instance
+        # if not getattr(self, "_padding_debug_done", False):
+        #     overall_nan_check = torch.isnan(tensor)
+        #     logger.warning(
+        #         f"[PADDING DEBUG] FINAL combined tensor shape={tuple(tensor.shape)}, "
+        #         f"any NaN = {overall_nan_check.any().item()}, "
+        #         f"NaN fraction = {overall_nan_check.float().mean().item():.4f}"
+        #     )
+        #     self._padding_debug_done = True  # only spam this once per Dataset instance
         # ============ END TEMP DEBUG BODGE ============
         return tensor
 
