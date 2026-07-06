@@ -5,9 +5,11 @@ import torch
 import torch.nn as nn
 import lightning as L
 
+from torchmetrics.classification import BinaryAccuracy
+
 from needle.ml.lightning.models.src.transformer_model import TransformerModel
 from needle.ml.lightning.models.src.training_configuration import custom_configure_optimizers
-from needle.ml.lightning.models.model_utils import unwrap_labels
+from needle.ml.lightning.models.model_utils import unwrap_labels, WeightedBinaryAccuracy
 
 from needle.utils.config_schema import DatasetConfig
 from needle.utils.logging import ColorFormatter
@@ -25,6 +27,11 @@ class RatioDensityEstimatorBinary(L.LightningModule):
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
+        # metrics form torchmetrics.classification
+        self.train_acc = BinaryAccuracy()
+        self.val_acc = BinaryAccuracy()
+        self.train_weighted_acc = WeightedBinaryAccuracy()
+        self.val_weighted_acc = WeightedBinaryAccuracy()
 
         # validate optimizer_configs 
         _required_optimizer_keys = {"optimizer", "lr"}
@@ -143,10 +150,22 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         else:
             loss = loss.mean()
 
-        # not sure if this is needed w.r.t. NEEDLE custom training imlementation? - TODO
-        # this is making use of hte inherited L model own logging...
+        # this is needed in the callbacks
         self.log(f"{stage}_loss", loss, on_step=(stage == "train"), on_epoch=True, prog_bar=True)
+
+        # accuracy
+        metric = self.train_acc if stage == "train" else self.val_acc
+        metric.update(output, labels.int())
+        self.log(f"{stage}_accuracy", metric, on_epoch=True, prog_bar=True)
+        if self.weighted_loss is not None:
+            weighted_metric = (
+                self.train_weighted_acc if stage == "train" else self.val_weighted_acc
+            )
+            weighted_metric.update(output, labels.int(), weights)
+            self.log(f"{stage}_weighted_accuracy", weighted_metric, on_epoch=True)
+
         return loss
+
 
     def training_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "train")
