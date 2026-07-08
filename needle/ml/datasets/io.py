@@ -47,10 +47,19 @@ class PartitionQueue:
     such as pytorch's DataLoader. The read Lock ensures that only one thread can read the
     file at a time.
     """
-
-    # NOTE: TODO: this dask.config.set was hard coded into the class declaration before
-    # no idea why it was put in, but it could be a bogde so that the num or dask workers doesn't explode
-    # I'll comment it out but it needs to be clarified/documented.
+    
+    # NOTE: REQUIRED, the line below forces dask's default (threaded) scheduler off globally.
+    # Without this, any parent-process dask.compute() call (e.g. a Scaler fitting
+    # in DataModule.setup(), which runs before DataLoader forks workers) can
+    # lazily create dask's global ThreadPoolExecutor. Forking a process with live
+    # threads is unsafe — a lock held by a non-forking thread at fork time is copied
+    # into the child in a permanently-locked state, since only the forking thread
+    # survives fork(). This causes a silent, total deadlock the moment a forked
+    # DataLoader worker calls .compute() itself. Confirmed via direct testing:
+    # removing this line reproduces a persistent, zero-progress hang under
+    # num_workers>0; restoring it resolves it.
+    # NOTE: this block has been commented out and moved to __init__
+    # the pipeline runs without issue with that change and is faster
     # dask.config.set(  # type: ignore
     #     scheduler="single-threaded",
     #     num_workers=1,
@@ -68,13 +77,15 @@ class PartitionQueue:
         Args:
             array (dak.Array): Dask Awkward Array to manage partitions.
         """
+        dask.config.set( scheduler="single-threaded", num_workers=1, )
         self.array = array
         self.total_num_partitions = array.npartitions
 
         if self.total_num_partitions > 1:
             self.array.eager_compute_divisions()
             self.read_lock = mp.Lock()
-            self.manager = mp.Manager()
+            # NOTE: removed this line to investigate a hang on multithreading
+            # self.manager = mp.Manager()
 
     def load_partition_thread_safe(
         self,
