@@ -4,7 +4,7 @@ results_path: "/data/dust/user/nkovacic/NEEDLE_v1-0/runs"  # reserved field
 #   my_field: ""  # arbitrary name and type
 
 estimators:
-  model_A:  # name of this estimator
+  model_padded_0001:  # name of this estimator
     model: binary_ratio_density_estimator       # reads file 'models/<bla>.yaml'
     datamodule: padded_datamodule               # reads file 'datamodules/<bla>.yaml'
     dataset: HTauTau_binary_classifier_dataset  # reads file 'datasets/<bla>.yaml'

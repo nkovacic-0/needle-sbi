@@ -30,7 +30,8 @@ dataset_config: # null
   labels_columns: ["label_ztautau_vs_others"]
   max_number_events: -1
   weights_combine: product
-num_features_in: null
+  
+num_features_in: 16
 optimizer_configs:
   optimizer: adamw
   lr: 3e-4
