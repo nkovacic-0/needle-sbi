@@ -10,8 +10,10 @@ import logging
 import warnings
 from typing import Any, Literal, Self, Type
 
+import pyarrow.parquet as pq
 import dask_awkward as dak
 import awkward as ak
+import numpy as np
 import pydantic
 import uproot
 
@@ -22,6 +24,7 @@ from needle.etl.array import (
     resolve_paths,
     brute_force_max_list_length,
 )
+
 from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("etl", level="DEBUG")
@@ -101,9 +104,10 @@ class Ingestor:
                 self.array = uproot.dask(paths, columns=columns, **reader_kwargs)  # type: ignore
         logger.debug(f"[{self.name}] Lazy array constructed.")
 
-        logger.debug(f"[{self.name}] Calling eager_compute_divisions()...")
-        self.array.eager_compute_divisions()  # type: ignore
-        logger.debug(f"[{self.name}] eager_compute_divisions() done.")
+        # NOTE: commented out the eager_compute_divisions as they get superceeded by the _inspect_array
+        # logger.debug(f"[{self.name}] Calling eager_compute_divisions()...")
+        # self.array.eager_compute_divisions()  # type: ignore
+        # logger.debug(f"[{self.name}] eager_compute_divisions() done.")
 
         logger.debug(f"[{self.name}] Running _inspect_array()...")
         self._inspect_array(self.array, paths)
@@ -354,45 +358,99 @@ class Ingestor:
 
         return length
 
-    def _inspect_array(
-        self,
-        array: dak.Array,  # type: ignore
-        paths: str | list[str],
-    ) -> None:
-        """Check if the input array has the required attributes.
+    # def _inspect_array(
+    #     self,
+    #     array: dak.Array,  # type: ignore
+    #     paths: str | list[str],
+    # ) -> None:
+    #     """Check if the input array has the required attributes.
 
-        Args:
-            array (dak.Array): Input Dask Awkward Array.
-            paths (str | list[str]): Paths to the input files. Used for error messages.
+    #     Args:
+    #         array (dak.Array): Input Dask Awkward Array.
+    #         paths (str | list[str]): Paths to the input files. Used for error messages.
 
-        Raises:
-            ValueError: If the input array does not have any fields.
+    #     Raises:
+    #         ValueError: If the input array does not have any fields.
 
-        Note:
-            Sideeffect: This method will try to find the divisions of the Array if they do not exist
-            and assign them to `self.array.divisions`.
+    #     Note:
+    #         Sideeffect: This method will try to find the divisions of the Array if they do not exist
+    #         and assign them to `self.array.divisions`.
 
-        NOTE: This part is a bit tricky due to nested fields. A field 'Lepton.pt' is nested because
-        it must be accessed using 'array.Lepton.pt'. In this function we first list all the fields
-        in our array, which is a list[str] (so completely flat). Then we need to check if the fields
-        are actually nested (this happens by trying the full string, then by splitting the string into
-        parts using a separator character, the actual value of which is irrelevant at this stage).
-        Finally, we have to settle on one separator character if the fields are nested. To summarize, if
-        the fields are flat, the separator is None. If they are nested, we return the separator so that
-        afterwards we can access it more easily.
+    #     NOTE: This part is a bit tricky due to nested fields. A field 'Lepton.pt' is nested because
+    #     it must be accessed using 'array.Lepton.pt'. In this function we first list all the fields
+    #     in our array, which is a list[str] (so completely flat). Then we need to check if the fields
+    #     are actually nested (this happens by trying the full string, then by splitting the string into
+    #     parts using a separator character, the actual value of which is irrelevant at this stage).
+    #     Finally, we have to settle on one separator character if the fields are nested. To summarize, if
+    #     the fields are flat, the separator is None. If they are nested, we return the separator so that
+    #     afterwards we can access it more easily.
+    #     """
+    #     if not hasattr(array, "fields") or not array.fields:
+    #         try:
+    #             raise ValueError(
+    #                 f"Input array does not have any fields: {array.fields}. "
+    #                 "Please check the validity of the input columns. Available fields are: "
+    #                 f"{dak.from_parquet(paths).fields}. "  # type: ignore  # NOTE Only valid for parquet
+    #             )
+    #         except AttributeError:
+    #             raise ValueError("Input array does not have attribute 'fields' or is empty.")
+
+    #     if not any(array.divisions):
+    #         self.array._divisions = brute_force_divisions(resolve_paths(paths))
+
+    def _inspect_array(self, array: dak.Array, paths: str | list[str]) -> None:
+        """Same inspect array as the one in GroupedIngestor... 
+        Fix for unrecognized internal parquet divisions
         """
         if not hasattr(array, "fields") or not array.fields:
             try:
                 raise ValueError(
                     f"Input array does not have any fields: {array.fields}. "
                     "Please check the validity of the input columns. Available fields are: "
-                    f"{dak.from_parquet(paths).fields}. "  # type: ignore  # NOTE Only valid for parquet
+                    f"{dak.from_parquet(paths).fields}. "
                 )
             except AttributeError:
                 raise ValueError("Input array does not have attribute 'fields' or is empty.")
 
         if not any(array.divisions):
-            self.array._divisions = brute_force_divisions(resolve_paths(paths))
+            n_partitions = array.npartitions
+            resolved_paths = resolve_paths(paths)
+
+            if n_partitions == len(resolved_paths):
+                logger.debug(
+                    f"[{self.name}] npartitions ({n_partitions}) matches file count; "
+                    "file-level brute_force_divisions is safe here."
+                )
+                self.array._divisions = brute_force_divisions(resolved_paths)
+            else:
+                logger.debug(
+                    f"[{self.name}] npartitions ({n_partitions}) != file count "
+                    f"({len(resolved_paths)}); recovering divisions via map_partitions(len) "
+                    "instead, to avoid collapsing real partitions down to file boundaries."
+                )
+                # partition_lengths = array.map_partitions(len).compute() # <-- this causes a type error crash!
+                # self.array._divisions = tuple(np.cumsum([0] + list(partition_lengths)).tolist())
+                # attempted fix below:
+                partition_lengths = []
+
+                for file_path in resolved_paths:
+                    parquet_file = pq.ParquetFile(file_path)
+                    metadata = parquet_file.metadata
+
+                    for i in range(metadata.num_row_groups):
+                        partition_lengths.append(metadata.row_group(i).num_rows)
+
+                if len(partition_lengths) != n_partitions:
+                    err_msg = (
+                        f"Recovered {len(partition_lengths)} parquet partitions, "
+                        f"but dask-awkward reports {n_partitions} partitions."
+                    )
+                    logger.error(err_msg)
+                    raise RuntimeError(err_msg)
+
+                self.array._divisions = tuple(np.cumsum([0] + partition_lengths).tolist())
+
+            logger.debug(f"[{self.name}] divisions recovered: npartitions={self.array.npartitions}")
 
     @classmethod
     def _resolve_format(cls: Type[Self], fmt: str, path: str) -> str:
