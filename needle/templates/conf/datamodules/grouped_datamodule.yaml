@@ -1,0 +1,19 @@
+_target_: needle.ml.lightning.datamodules.grouped_datamodule.GroupedDataModule
+
+multiprocessing_type: torch
+n_workers: 4
+batch_size: 1024
+# n_workers: 100
+# batch_size: 16384 # 2^14
+ 
+# Padding layout save/load
+padding_lengths_save_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding/grouped_padding_info_HTT_train.json
+force_resave_padding_scaler: False
+# set to null to recompute padding fresh instead of loading
+# padding_lengths_load_path: null
+padding_lengths_load_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding/grouped_padding_info_HTT_train.json
+
+# Step 2/4 in GroupedDataMosule toggles and opt-in validation
+apply_sentinel_resolution: True
+apply_missing_column_fill: True
+validate_padding_layout: False

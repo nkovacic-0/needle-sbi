@@ -1,0 +1,24 @@
+results_path: "/data/dust/user/nkovacic/NEEDLE_v1-0/runs"  # reserved field
+# results_path_downstream: ""  # in case you need multiple evaluation folders for the same training
+# custom_settings:  # extra user-defined settings (not managed by hydra/OmegaConf)
+#   my_field: ""  # arbitrary name and type
+
+estimators:
+  model_grouped_0001:  # name of this estimator
+    model:      binary_ratio_density_estimator_grouped   # reads file 'models/<bla>.yaml'
+    datamodule: grouped_datamodule                       # reads file 'datamodules/<bla>.yaml'
+    dataset:    HTauTau_grouped_pipeline_dataset_config  # reads file 'datasets/<bla>.yaml'
+    trainer:    torch_trainer                            # reads file 'trainers/<bla>.yaml'
+    # requires: []  # another estimator field
+    dataset_override: {}
+    expands:
+      # systematics:
+      #  nominal:
+      #     model: mock_transformer  # point to another dataset
+      #     datamodule_override:  # or modify individual entries
+      #      batch_size: 256  # specific to your datamodule
+      #     dataset: default  # if not set, will inherit from parent estimator (model_A.dataset)
+      #     trainer: default
+      ensembles:
+        num_ensembles: 1
+      folds: 1

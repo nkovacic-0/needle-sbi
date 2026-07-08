@@ -1,0 +1,48 @@
+paths: "/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/FAIR_Universe_HiggsML_data_metadata_ztautau_classification_FIXED_TRAIN.parquet"
+format: parquet
+# max_number_events: -1
+max_number_events: 20000000
+
+feature_columns_grouped:
+  - [PRI_lep_pt,  PRI_had_pt,  PRI_jet_leading_pt,  PRI_jet_subleading_pt,  PRI_met]       # "pt"  row
+  - [PRI_lep_eta, PRI_had_eta, PRI_jet_leading_eta, PRI_jet_subleading_eta, PRI_met_eta]   # "eta" row
+  - [PRI_lep_phi, PRI_had_phi, PRI_jet_leading_phi, PRI_jet_subleading_phi, PRI_met_phi]   # "phi" row
+
+# feature names are just cosmetics here
+feature_names: [pt, eta, phi]
+particle_names: [lep, had, jet_leading, jet_subleading, met]
+
+labels_columns: [label_ztautau_vs_others]
+weights_columns: [normalized_weight_ztautau_vs_others]
+weights_combine: product
+
+replacements_default: 0.0
+replacements_missing_columns:
+  PRI_met_eta: 0.0
+
+
+general_sentinel_value: -25.0
+replace_all_sentinel_values: True
+replacements_sentinel_default: nan
+# Optional per-column overrides of the sentinel fill value. Use `null` to mean
+# "use replacements_sentinel_default". Only meaningful for documentation /
+# unusual cases — for this dataset, leaving this empty and relying on
+# replace_all_sentinel_values + replacements_sentinel_default is sufficient.
+replacements_sentinel_columns: {}
+# Example, if ever needed:
+#   PRI_jet_subleading_pt: null   # -> uses replacements_sentinel_default (NaN)
+
+scaler_choice: standard   # "standard" | "minmax"
+scaler_save_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/scalers/column_scaler_info_HTT_train.json
+# scaler_load_path: null
+scaler_load_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/scalers/column_scaler_info_HTT_train_0.json
+# scaler_load_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/scalers/grouped_scaler_info_HTT_train.json
+# scaler_load_path: /data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/scalers/grouped_scaler_info_HTT_train_0_m28q5lmg.json
+scaler_use_sampling: False
+scaler_sample_fraction: 0.10
+force_avoid_partition_sampling: False
+
+# kwargs passed directly to dask awkward reader
+dak_reader_kwargs:
+  ignore_metadata: False
+  split_row_groups: True

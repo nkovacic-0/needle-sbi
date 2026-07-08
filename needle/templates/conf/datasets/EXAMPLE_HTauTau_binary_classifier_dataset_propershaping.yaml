@@ -1,0 +1,124 @@
+# =============================================================================
+# Grouped particle-feature dataset config 
+# (NOTE: clanker-anotated, with way more text than it is neccessary)
+# =============================================================================
+# This config describes a dataset where features should be reshaped into a
+# dense (particles, features) grid per event, rather than the existing
+# flat (E, 1, PxF) or ragged (E, P, F) shapes the current pipeline produces.
+#
+# It is deliberately a SEPARATE config schema from the existing DatasetConfig —
+# not an extension of it — since the semantics (grouped columns, replacement
+# rules, sentinel handling) don't apply to the existing ragged/flat pipeline
+# and shouldn't be mixed into its validation logic.
+# =============================================================================
+
+paths: <>.parquet
+format: parquet
+dak_reader_kwargs: {}
+max_number_events: -1
+
+# -----------------------------------------------------------------------------
+# feature_columns_grouped: list[list[str]]
+#
+# Outer list = feature types, in the fixed order they will occupy the final
+# "features" axis of the output tensor (i.e. features_columns[i] corresponds
+# to feature-axis index i).
+#
+# Inner list = one column name per particle, in the fixed order particles will
+# occupy the "particles" axis of the output tensor (i.e. features_columns[*][j]
+# corresponds to particle-axis index j, and must refer to the SAME physical
+# particle across every inner list).
+#
+# Every inner list must have the same length (same particle count). This is
+# validated at config-load time, not silently reshaped.
+#
+# A column name that doesn't exist in the dataset (e.g. PRI_met_eta, which has
+# no physical meaning for MET) MUST appear in replacements_missing_columns
+# below — any other missing column is a hard error (protects against typos).
+# -----------------------------------------------------------------------------
+feature_columns_grouped:
+  - [PRI_lep_pt,  PRI_had_pt,  PRI_jet_leading_pt,  PRI_jet_subleading_pt,  PRI_met]       # "pt"  row
+  - [PRI_lep_eta, PRI_had_eta, PRI_jet_leading_eta, PRI_jet_subleading_eta, PRI_met_eta]   # "eta" row
+  - [PRI_lep_phi, PRI_had_phi, PRI_jet_leading_phi, PRI_jet_subleading_phi, PRI_met_phi]   # "phi" row
+
+# Optional, purely descriptive — used only for logging/debug messages, not for hard any lookup logic.
+feature_names: [pt, eta, phi]
+particle_names: [lep, had, jet_leading, jet_subleading, met]
+
+labels_columns: [label_ztautau_vs_others]
+weights_columns: [normalized_weight_ztautau_vs_others]
+weights_combine: product
+
+# -----------------------------------------------------------------------------
+# replacements_missing_columns: dict[str, float]
+#
+# Columns named here are NEVER sent to the parquet/dak reader — they are
+# schema-absent by design (e.g. MET has no eta). Every event gets this exact
+# fixed value at that (particle, feature) slot, applied AFTER scaling
+# (i.e. this is a raw-space constant in the final tensor, not passed through
+# the fitted scaler).
+#
+# If a column listed here IS actually found in the dataset, a warning is
+# raised (not an error) — likely means the config is stale relative to the
+# data, worth a human's attention but not fatal.
+#
+# Exception: if, for a given event, every OTHER (real, non-replacement)
+# feature belonging to the same particle is NaN (see sentinel/None handling
+# below) at that event, this fixed value is overridden to NaN too — i.e. a
+# genuinely absent particle stays fully NaN across all its features, rather
+# than showing a fabricated constant in the one slot that "should" have been
+# a fixed replacement. See particle_feature_pipeline.py for exact ordering.
+# -----------------------------------------------------------------------------
+replacements_missing_columns:
+  PRI_met_eta: 0.0
+
+# Fallback fixed value for any missing column NOT explicitly listed above.
+# (Currently unused unless a future particle/feature is added without an
+# explicit entry — present for forward-compatibility / fewer required edits.)
+replacements_default: 0.0
+
+# -----------------------------------------------------------------------------
+# Sentinel value handling — for columns that DO exist in the file, but encode
+# "this particle is absent for this event" via a magic numeric value (e.g.
+# -25.0 in this dataset for jets when PRI_jet_num is too low), rather than a
+# real awkward `None`.
+#
+# Real awkward `None` / missing entries (ak.is_none) are ALWAYS checked and
+# replaced with NaN, unconditionally, regardless of anything below — this is
+# unambiguous and needs no config.
+# -----------------------------------------------------------------------------
+general_sentinel_value: -25.0
+
+# If True: every column is checked against general_sentinel_value.
+# If False: only columns listed in sentinel_columns below are checked.
+# Recommended: True, so a column carrying this sentinel can't be silently
+# missed by omission from the list below.
+replace_all_sentinel_values: true
+
+# Fill value used when a sentinel (or real None) is found, unless overridden
+# per-column below. Almost always should be NaN — see design note above about
+# why fixed replacements and sentinel/null replacements serve different
+# purposes (schema-absent-but-real-particle vs particle-doesn't-exist).
+replacements_sentinel_default: nan
+
+# Optional per-column overrides of the sentinel fill value. Use `null` to mean
+# "use replacements_sentinel_default". Only meaningful for documentation /
+# unusual cases — for this dataset, leaving this empty and relying on
+# replace_all_sentinel_values + replacements_sentinel_default is sufficient.
+replacements_sentinel_columns: {}
+# Example, if ever needed:
+#   PRI_jet_subleading_pt: null   # -> uses replacements_sentinel_default (NaN)
+
+# -----------------------------------------------------------------------------
+# Scaler config — unchanged concepts from the existing pipeline, but the
+# FITTING GRANULARITY is different: one scaler is fit per FEATURE ROW (i.e.
+# per inner-list position across feature_columns — "pt", "eta", "phi"),
+# pooling every particle's real (non-replacement, non-sentinel, non-None)
+# values for that feature together, rather than one scaler per raw column.
+# -----------------------------------------------------------------------------
+scaler_choice: standard   # "standard" | "minmax"
+scaler_save_path: null
+scaler_load_path: null
+scaler_use_sampling: false
+scaler_sample_fraction: 0.10
+force_avoid_partition_sampling: False
