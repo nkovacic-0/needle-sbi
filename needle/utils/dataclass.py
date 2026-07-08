@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, Self, Tuple
@@ -42,12 +43,29 @@ class SerializableDataclass:
     def to_yaml(self, yaml_file: str | Path) -> None:
         """
         Save the current configuration to a YAML file.
-
         Args:
             yaml_file (str): Path to the YAML file.
         """
+        data = asdict(self)
+        data = self._plain_serializable(data)
         with open(yaml_file, "w") as f:
-            yaml.dump(asdict(self), f, default_flow_style=False)
+            yaml.dump(data, f, default_flow_style=False)
+            # yaml.dump(asdict(self), f, default_flow_style=False)
+
+    @staticmethod
+    def _plain_serializable(obj: Any) -> Any:
+        """Recursively convert Enum members to their plain value, so yaml.dump
+        (and json.dump) never need a custom representer for Enum types — the
+        resulting file only ever contains plain scalars/lists/dicts, safe to
+        round-trip through yaml.safe_load.
+        """
+        if isinstance(obj, Enum):
+            return obj.value
+        if isinstance(obj, dict):
+            return {k: SerializableDataclass._plain_serializable(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [SerializableDataclass._plain_serializable(v) for v in obj]
+        return obj
 
     @classmethod
     def from_json(cls, json_file: str | Path, strict: bool = False) -> Self:

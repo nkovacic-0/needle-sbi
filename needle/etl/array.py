@@ -114,6 +114,26 @@ def brute_force_max_list_length(paths: list[str], column: str) -> int:
         raise
     return max_len
 
+def is_ragged(column: dak.Array) -> bool:
+    """Cheap, data-free check (typetracer metadata) for whether a field is
+    scalar-per-event (ndim < 2) or a variable-length list per event.
+    """
+    return column.ndim >= 2
+ 
+ 
+ 
+def concat_and_pad_row(columns: list[dak.Array], target_total: int) -> dak.Array:
+    """Concatenate all particle-type columns for one feature-row (scalar columns
+    contributing a length-1 list, ragged columns their raw length), pad the
+    combined list once to `target_total`, then NaN-fill any resulting None.
+    NOTE: Particle order within the row is not preserved neccessarily.
+    """
+    wrapped = [c if is_ragged(c) else ak.singletons(c, axis=0) for c in columns]
+    combined = ak.concatenate(wrapped, axis=1)
+    padded = ak.pad_none(combined, axis=1, target=target_total, clip=True)
+    return ak.fill_none(padded, np.nan)
+
+
 
 class NestedArrayIndexer:
     VALID_SEPARATORS = {".", "_", "/"}
