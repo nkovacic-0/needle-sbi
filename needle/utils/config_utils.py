@@ -157,19 +157,32 @@ def resolve_defaults(
             if base_cfg:
                 if override_key == "dataset_override":
                     base_dict = OmegaConf.to_container(base_cfg, resolve=False)
+                    # NOTE: this is the alternative fix to the one below
+                    schema_defaults = OmegaConf.to_container(OmegaConf.structured(DatasetConfig), resolve=False)
+                    # Only keep keys whose value differs from THIS FIELD's own schema default —
+                    # not a fixed generic set of "empty" values, which can't distinguish an
+                    # untouched field from a real override that happens to share a common
+                    # default (e.g. max_number_events=-1, a boolean False, an Enum default).
+                    base_dict = {k: v for k, v in base_dict.items() if _differs_from_default(v, schema_defaults.get(k))}
+
                     # remove default placeholders so they don't override actual params
-                    base_dict = {
-                        k: v for k, v in base_dict.items()
-                        if v not in ("", [], None)
-                    }
+                    # base_dict = {
+                    #     k: v for k, v in base_dict.items()
+                    #     if v not in ("", [], None, {})
+                    # }
+                    # group_cfg may come from hydra.compose(), which is struct-mode and
+                    # locked to only the keys present in the dataset yaml. Since base_dict
+                    # can carry additional DatasetConfig fields (schema defaults) that
+                    # aren't in that yaml, group_cfg must be de-structed to a plain
+                    # container before it's used as a merge target, or any key not in
+                    # the yaml file raises a ConfigKeyError.
+                    group_cfg_plain = OmegaConf.create(
+                        OmegaConf.to_container(group_cfg, resolve=False)
+                    )
                     est_cfg[override_key] = OmegaConf.merge(
                         OmegaConf.structured(DatasetConfig),
-                        OmegaConf.merge(group_cfg, OmegaConf.create(base_dict))
+                        OmegaConf.merge(group_cfg_plain, OmegaConf.create(base_dict))
                     )
-                    # this line causes a crash if dak_reader_kwargs is filled in dataset_config!
-                    # the current fix is above. TODO - confirm that the fix will work in all needle use cases
-                    # est_cfg[override_key] = OmegaConf.merge(base_cfg, group_cfg)
-                    print(OmegaConf.to_yaml(est_cfg))
                 else:
                     base_dict = OmegaConf.to_container(base_cfg, resolve=False)
                     group_dict = OmegaConf.to_container(group_cfg, resolve=False)
@@ -181,6 +194,13 @@ def resolve_defaults(
     cfg["_resolved"] = True
     return cfg
 
+def _differs_from_default(v, default):
+    if isinstance(v, float) and isinstance(default, float) and v != v and default != default:
+        # importantly, if we went for a simple comapre if there are any overrides with a '!=' check, 
+        # then a case of float("nan") != float("nan") ould always be True and it would be seen as a
+        # real override. This function is intended to close that edge case.
+        return False 
+    return v != default
 
 def hydra_check_if_arg_supported(
     cfg: DictConfig | None,
@@ -336,6 +356,8 @@ def compare_configs(self: MainConfig, other: object) -> Optional[str]:
 
     RED, GREEN, CYAN, BOLD, RESET = "\033[31m", "\033[32m", "\033[36m", "\033[1m", "\033[0m"
 
+    # NOTE: TODO: would this run into the same issue as resolve_defaults's section that required a 
+    # special catch for float('nan') != float('nan') always giving True? 
     if self == other:
         return None
 
