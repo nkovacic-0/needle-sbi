@@ -78,6 +78,7 @@ def convert_root_to_parquet(
         columns = NestedArrayIndexer.list_all_fields(array, as_tuple=False, separator=".")  # type: ignore
 
         for column in columns:
+            # NOTE: TODO: looks like this will drop all non-nested columns?
             if not filter_name_func(column) or "." not in column:
                 continue
 

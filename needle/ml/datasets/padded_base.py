@@ -1,9 +1,5 @@
 """
 Base class for padded Datasets. Provided methods for other datasets to inherit from.
-
-TODO Padding happens for each column independently, which improves memory usage. It might
-not be finished yet for training and evaluation datasets, as they should have the same
-padding.
 """
 
 import logging
@@ -39,8 +35,9 @@ class PaddedDatasetBase(Dataset, ABC):
     def __init__(self, *args, **kwargs):
         pass
 
-    def __len__(self) -> int:
-        return self.features_ingestor.length
+    # __len__ being defined can be a problem if torch workers > 0
+    # def __len__(self) -> int:
+    #     return self.features_ingestor.length
 
     def convert_ragged_ak_to_tensor(self, array: ak.Array, fields: list[str], ingestor: Ingestor) -> torch.Tensor:
         # TODO - check that the docstring explains what is going on (I'm continuosly making code updates, but not docstring updates)

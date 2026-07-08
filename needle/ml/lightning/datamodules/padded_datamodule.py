@@ -105,8 +105,11 @@ class PaddedDataModule(L.LightningDataModule):
         if self.scaler_load_path is not None:
             logger.info(f"Loading pre-fitted scaler from {self.scaler_load_path}...")
             self.scaler = load_scaler(self.scaler_load_path)   # auto-detects StandardScaler/MinMaxScaler
-            if type(self.scaler).__name__.lower().replace("scaler", "") != self.scaler_name:  # rough check
-                logger.warning(f"scaler_choice='{self.scaler_name}' is being ignored, loaded {type(loaded).__name__} from disk instead.")
+            if type(self.scaler).__name__.lower().replace("scaler", "") != self.scaler_name:
+                logger.warning(
+                    f"scaler_choice='{self.scaler_name}' is being ignored, loaded "
+                    f"{type(self.scaler).__name__} from disk instead."
+                )
             self.scaler_name = type(self.scaler).__name__
             features.array = self.scaler.apply_with_cache(features.array, self.scaler.cache)
             logger.info(f"Scaler loaded and applied ({self.scaler_name}).")

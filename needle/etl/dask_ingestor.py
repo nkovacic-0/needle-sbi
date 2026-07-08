@@ -16,6 +16,7 @@ import awkward as ak
 import numpy as np
 import pydantic
 import uproot
+import dask
 
 from needle.etl.array import (
     NestedArrayIndexer,
