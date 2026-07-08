@@ -178,7 +178,11 @@ class PaddedDataModule(L.LightningDataModule):
                 raise ValueError(name)
 
     def train_dataloader(self) -> DataLoader:
-        if self.fold_index and self.n_folds:
+        # the condition that has been commented out evaluates to false for fold_index == 0 
+        # (n.b. from estimator task: List[FoldTask]: One task per fold (0 to n_folds-1))
+        # and falls back to using the whole dataset, fixed with the new condition
+        # if self.fold_index and self.n_folds:
+        if self.fold_index is not None and self.n_folds and self.n_folds > 1:
             kfold = KFold(
                 fold_index=self.fold_index,
                 n_folds=self.n_folds,
@@ -206,7 +210,11 @@ class PaddedDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
-        if self.fold_index and self.n_folds:
+        # the condition that has been commented out evaluates to false for fold_index == 0 
+        # (n.b. from estimator task: List[FoldTask]: One task per fold (0 to n_folds-1))
+        # and falls back to using the whole dataset, fixed with the new condition
+        # if self.fold_index and self.n_folds:
+        if self.fold_index is not None and self.n_folds and self.n_folds > 1:
             kfold = KFold(
                 fold_index=self.fold_index,
                 n_folds=self.n_folds,
