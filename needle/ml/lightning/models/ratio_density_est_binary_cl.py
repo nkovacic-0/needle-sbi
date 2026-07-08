@@ -30,8 +30,9 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         # metrics form torchmetrics.classification
         self.train_acc = BinaryAccuracy()
         self.val_acc = BinaryAccuracy()
-        self.train_weighted_acc = WeightedBinaryAccuracy()
-        self.val_weighted_acc = WeightedBinaryAccuracy()
+        if weighted_loss is not None:
+            self.train_weighted_acc = WeightedBinaryAccuracy()
+            self.val_weighted_acc = WeightedBinaryAccuracy()
 
         # validate optimizer_configs 
         _required_optimizer_keys = {"optimizer", "lr"}
@@ -58,17 +59,23 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         # we want to add the number of input features to the transformer_model_configs
         # first, we make a copy so we don't mutate the original config dict
         self.transformer_model_configs = dict(transformer_model_configs)
+        # determine input dimenson
         if num_features_in is not None:
             self.num_features_in = int(num_features_in)
-        if dataset_config is not None:
-            self.num_features_in = len(DatasetConfig(**dataset_config).features_columns)
-        elif dataset_config is None:
+        elif dataset_config is not None:
+            ds_cfg = DatasetConfig(**dataset_config)
+            if ds_cfg.feature_columns_grouped is not None:
+                self.num_features_in = len(ds_cfg.feature_columns_grouped)
+            else:
+                self.num_features_in = len(ds_cfg.features_columns)
+        else:
             err_msg = (
-                f"Expected at least one of 'num_features_in' or 'dataset_config' to be != None, "
-                f"But was provided with None fo rboth variables. Cannot determine input tensor dimension!"
+                "Expected at least one of 'num_features_in' or 'dataset_config' to be != None, "
+                "but was provided with None for both. Cannot determine input tensor dimension!"
             )
             logger.error(err_msg)
-            raise ValueError(err_msg)           
+            raise ValueError(err_msg)
+                 
         self.transformer_model_configs["num_features_in"] = self.num_features_in
 
         # reduction for the loss is handled in the _shared_step method
@@ -156,13 +163,13 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         # accuracy
         metric = self.train_acc if stage == "train" else self.val_acc
         metric.update(output, labels.int())
-        self.log(f"{stage}_accuracy", metric, on_epoch=True, prog_bar=True)
+        self.log(f"{stage}_accuracy", metric.compute(), on_epoch=True, prog_bar=True)
         if self.weighted_loss is not None:
             weighted_metric = (
                 self.train_weighted_acc if stage == "train" else self.val_weighted_acc
             )
             weighted_metric.update(output, labels.int(), weights)
-            self.log(f"{stage}_weighted_accuracy", weighted_metric, on_epoch=True)
+            self.log(f"{stage}_weighted_accuracy", weighted_metric.compute(), on_epoch=True)
 
         return loss
 
@@ -172,3 +179,13 @@ class RatioDensityEstimatorBinary(L.LightningModule):
 
     def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> None:
         return self._shared_step(batch, "val")
+
+    # reset metrics
+    def on_validation_epoch_start(self):
+        self.val_acc.reset()
+        if self.weighted_loss is not None:
+            self.val_weighted_acc.reset()
+    def on_train_epoch_start(self):
+        self.train_acc.reset()
+        if self.weighted_loss is not None:
+            self.train_weighted_acc.reset()
