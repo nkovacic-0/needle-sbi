@@ -8,7 +8,7 @@ import awkward as ak
 import numpy as np
 import torch
 
-from needle.etl.array import NestedArrayIndexer, concat_and_pad_row
+from needle.etl.array import NestedArrayIndexer
 from needle.etl.dask_grouped_ingestor import GroupedIngestor
 from needle.ml.datasets.padded_base import PaddedDatasetBase
 from needle.utils.logging import ColorFormatter
@@ -42,7 +42,7 @@ class GroupedDatasetBase(PaddedDatasetBase):
             or set_padding_lengths()) before this runs.
 
         Returns:
-            torch.Tensor: shape (E, particle_max, n_features).
+            torch.Tensor: shape (E, P=particle_max, F=n_features).
         """
         layout = ingestor.get_all_padding_lengths()
         if "__total__" not in layout:
@@ -53,14 +53,22 @@ class GroupedDatasetBase(PaddedDatasetBase):
         target_total = layout["__total__"]
         logger.debug(f"[GroupedDatasetBase] target_total={target_total}")
 
-        row_tensors = []
-        for row in ingestor.feature_columns_grouped:
-            columns = [NestedArrayIndexer.get_nested_field(array, field, ingestor.SEPARATOR) for field in row]
-            padded_row = concat_and_pad_row(columns, target_total)
-            row_tensors.append(padded_row[..., np.newaxis])
+        # replaced the concat_and_pad_row operation with a dask-based alternative, should be much faster
+        # row_tensors = []
+        # for row in ingestor.feature_columns_grouped:
+        #     columns = [NestedArrayIndexer.get_nested_field(array, field, ingestor.SEPARATOR) for field in row]
+        #     padded_row = concat_and_pad_row(columns, target_total)
+        #     row_tensors.append(padded_row[..., np.newaxis])
+        # events = ak.concatenate(row_tensors, axis=-1)
+        # tensor = torch.tensor(ak.to_numpy(events), dtype=torch.float32)
 
-        events = ak.concatenate(row_tensors, axis=-1)
-        tensor = torch.tensor(ak.to_numpy(events), dtype=torch.float32)
+        padded = ingestor.build_grouped_tensor(array, target_total)
+        dense = np.stack(
+            [ak.to_numpy(ak.fill_none(padded[name], np.nan)) for name in ingestor.feature_names],
+            axis=-1,
+        )
+        tensor = torch.tensor(dense, dtype=torch.float32)
+
         if not getattr(self, "_grouped_debug_done", False):
             _nan = torch.isnan(tensor)
             logger.debug(
@@ -69,6 +77,7 @@ class GroupedDatasetBase(PaddedDatasetBase):
             )
             self._grouped_debug_done = True
         return tensor
+    
 
     def convert_ragged_ak_to_tensor(self, *args, **kwargs):
         raise NotImplementedError(

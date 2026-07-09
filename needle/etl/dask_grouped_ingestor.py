@@ -8,7 +8,7 @@ import dask_awkward as dak
 import pyarrow.parquet as pq
 import uproot
 
-from needle.etl.array import NestedArrayIndexer, resolve_paths, brute_force_max_list_length
+from needle.etl.array import NestedArrayIndexer, resolve_paths, brute_force_max_list_length, is_ragged
 from needle.etl.dask_ingestor import Ingestor
 from needle.utils.logging import ColorFormatter
 
@@ -109,7 +109,9 @@ class GroupedIngestor(Ingestor):
         self.num_classes = len(self.fields)
 
         if max_number_events > 0:
+            logger.debug(f"[{self.name}] before truncation: npartitions={self.array.npartitions}, divisions={self.array.divisions}")
             self.array = self.array[0:max_number_events]
+            logger.debug(f"[{self.name}] after truncation: npartitions={self.array.npartitions}, divisions={self.array.divisions}")
 
         self.length = self._get_length(self[self.fields[0]], paths)
         logger.info(
@@ -218,6 +220,42 @@ class GroupedIngestor(Ingestor):
             "name, with one reference field derived per particle from feature_columns_grouped, "
             "not an arbitrary field list."
         )
+
+    def build_grouped_tensor(self, array: ak.Array, target_total: int) -> ak.Array:
+        """Single-pass replacement for looping concat_and_pad_row over each feature-row.
+
+        Zips each particle-group's features together FIRST (cheap — no padding
+        involved yet, just attaching sibling columns), concatenates the particle
+        groups ONCE, and pads ONCE — instead of once per feature-row. Safe under
+        the same invariant convert_grouped_ak_to_tensor already relies on: within
+        a particle-group, all of that group's own feature columns share identical
+        per-event cardinality (and index alignment) for every event.
+
+        Args:
+            array (ak.Array): A single already-computed partition — must have
+                sentinel resolution, scaler application, and missing-column fill
+                already applied upstream (same precondition as
+                convert_grouped_ak_to_tensor).
+            target_total (int): Padding target, i.e. layout["__total__"] from
+                self.get_all_padding_lengths().
+
+        Returns:
+            ak.Array: record array of shape (E, target_total), one field per
+                entry in self.feature_names. Fields still contain None where
+                padded — caller fills/stacks per field.
+        """
+        grid = self.feature_columns_grouped  # which has the form F rows x P particle-groups
+
+        blocks = []
+        for j in range(len(grid[0])):  # one block per particle-group
+            group_cols = {}
+            for f, row in enumerate(grid):
+                col = NestedArrayIndexer.get_nested_field(array, row[j], self.SEPARATOR)
+                group_cols[self.feature_names[f]] = col if is_ragged(col) else ak.singletons(col, axis=0)
+            blocks.append(ak.zip(group_cols, depth_limit=2))
+
+        combined = ak.concatenate(blocks, axis=1)  
+        return ak.pad_none(combined, axis=1, target=target_total, clip=True)  
 
     def compute_padding_layout(self) -> dict[str, Any]:
         """Per-particle-type padding length. Computation is still cheap — one
