@@ -38,7 +38,7 @@ def load_partition(
     if event_index > 0:
         return array.partitions[partition_id][0:event_index]
     if event_index < 0:
-        return array.partitions[partition_id][abs(event_index) : -1]
+        return array.partitions[partition_id][abs(event_index) : ]
 
 
 class PartitionQueue:
@@ -81,7 +81,8 @@ class PartitionQueue:
         self.total_num_partitions = array.npartitions
 
         if self.total_num_partitions > 1:
-            self.array.eager_compute_divisions()
+            if not any(self.array.divisions):
+                self.array.eager_compute_divisions()
             self.read_lock = mp.Lock()
             # NOTE: removed this line to investigate a hang on multithreading
             # self.manager = mp.Manager()
