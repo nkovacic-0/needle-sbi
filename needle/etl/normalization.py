@@ -1,8 +1,10 @@
 """
-Compute normalization constants from Parquet file metadata.
+Scalers (StandardScaler, MinMaxScaler) for normalizing dask-awkward columns,
+fitting statistics either from full data or a sample.
 
-Collects per-file (partition) column statistics such as min/max,
-without reading any data into memory.
+Also includes gather_metadata(), a lightweight helper that collects per-file
+(partition) column statistics such as min/max directly from Parquet file
+metadata, without reading any data into memory.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("etl")
 
-#: Nested metadata structure: ``{field → {scaler_key → {class_index → value}}}``.
+#: Nested metadata structure: {field -> {scaler_key -> {partition_id -> value}}}.
 type MetaDataDict = dict[str, dict[str, dict[int, Any]]]
 
 
@@ -45,7 +47,8 @@ def clean_column_name(path: str) -> str:
     filtered = [p for p in parts if p not in {"list", "item"}]
     return ".".join(filtered)
 
-# TODO: this helper functions seems unifinished, or rather, that it was never implemented in scalers
+# NOTE: not currently consumed by any BaseScaler subclass
+# TODO: wire it in as a an optional metadata-only fitting path
 def gather_metadata(paths: list[str]) -> MetaDataDict:
     """
     Collect min/max stats for all columns in each Parquet file using pyarrow.

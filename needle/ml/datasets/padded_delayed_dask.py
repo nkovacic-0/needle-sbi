@@ -25,21 +25,24 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         kfold: KFold | None = None,
         weights_combine: Literal["product", "sum"] = "product",
     ):
-        # TODO - update docstring!
-        """This class extends the PaddedDatasetBase to support chunked iterating with Dask.
+        """This class extends PaddedDatasetBase to support out-of-memory iterating with Dask.
 
         Args:
-            features (dak.Array): Dask_awkward array containing feature columns
-            labels (dak.Array): Dask_awkward array containing label columns
-            shuffle_partitions (bool): Whether to shuffle partition order
-            shuffle_events (bool): Whether to shuffle events within each partition
-            random_seed (int): Random seed for reproducibility
-            kfold (KFold, optional): Instance of the KFold class
+            features (Ingestor): Ingestor holding the feature columns.
+            labels (Ingestor): Ingestor holding the label columns.
+            weights (Ingestor): Ingestor holding the weight columns.
+            shuffle_partitions (bool): Whether to shuffle partition order.
+            shuffle_events (bool): Whether to shuffle events within each partition.
+            random_seed (int): Random seed for reproducibility.
+            kfold (KFold, optional): Instance of the KFold class.
+            weights_combine (Literal["product", "sum"]): Combination mode when multiple
+                weight columns are configured.
 
         Note:
             This dataset is designed for single-worker use (num_workers=0) to avoid
             multiprocessing complexity. For multi-worker processing, use PaddedTorchDataset.
         """
+
         self.features_ingestor = features
         self.labels_ingestor = labels
         self.weights_ingestor = weights
@@ -54,21 +57,13 @@ class PaddedDaskDataset(IterableDataset, PaddedDatasetBase):
         self.weights_names = weights.fields
         self.weights_combine = weights_combine
 
-        # moved the explicit computation force (call) to datamodule level, into setup() method
-        # self._compute_padding_lengths(self.feature_names)
-
-        # temp addition of a debug/dump
-        # padding_lengths_path = '/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding_info_HTT_train.json'
-        # if padding_lengths_path is not None:
-        #     self.dump_padding_lengths(padding_lengths_path)
-
     def __iter__(self):
         """Iterate through partitions sequentially
 
         Yields:
             tuple: A tuple (features, labels, weights) of torch Tensors with shape (P, F)
         """
-        # note: this implementation of rng won't always be completely consistent 
+        # NOTE: this implementation of rng won't always be completely consistent 
         # as the result of the call can depend on the hardware (so, different results
         # could be observed when running on different cluster nodes, even with same seed)
         rng = np.random.default_rng(self.random_seed)

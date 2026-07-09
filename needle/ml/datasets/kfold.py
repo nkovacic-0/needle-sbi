@@ -1,5 +1,5 @@
 """
-Small helper functions for ML Datasets
+KFold: partition-level k-fold splitting for chunked/partitioned ML Datasets.
 """
 
 from __future__ import annotations

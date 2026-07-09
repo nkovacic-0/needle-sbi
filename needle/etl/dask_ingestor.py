@@ -39,6 +39,14 @@ class Ingestor:
             - `parquet`: Read parquet files using `dask_awkward.from_parquet`
             - `root`: Read root files using `uproot.dask`
 
+    Args:
+        max_number_events (int): If > 0, truncate the loaded array to the first
+                `max_number_events` events. Defaults to -1 (no truncation).
+        name (str): Human-readable label for this Ingestor instance, used in log
+                messages. Defaults to "unnamed".
+    Returns:
+        Ingestor: An instance of this class with the data loaded (lazily) into a Dask Awkward Array.
+
     Attributes:
         array (dak.Array): Dask Awkward Array containing the data.
         fields (list[str]): List of fields in the array.
@@ -105,7 +113,7 @@ class Ingestor:
                 self.array = uproot.dask(paths, columns=columns, **reader_kwargs)  # type: ignore
         logger.debug(f"[{self.name}] Lazy array constructed.")
 
-        # NOTE: commented out the eager_compute_divisions as they get superceeded by the _inspect_array
+        # NOTE: commented out the eager_compute_divisions as they get superseded by _inspect_array
         # logger.debug(f"[{self.name}] Calling eager_compute_divisions()...")
         # self.array.eager_compute_divisions()  # type: ignore
         # logger.debug(f"[{self.name}] eager_compute_divisions() done.")
@@ -169,7 +177,7 @@ class Ingestor:
         self._padding_lengths.update(results)
         return results
 
-    # # TODO - test and validate this alternate padding calculation!
+    # # NOTE: alternative version of get_padding_length, deprecated
     # def get_padding_length(self, field: str, method: Literal["dask", "pyarrow"] = "dask") -> int:
     #     """Compute (and cache) the max per-event list length for a ragged field.
     #     Args:
@@ -208,7 +216,8 @@ class Ingestor:
     #         self._padding_lengths[field] = length
     #     return self._padding_lengths[field]
 
-    # alternative for the code above, should be safer to run TODO - vlaidate this get_padding_length approach!
+    # Computes (and caches) the max per-event list length for a ragged field, dispatching
+    # to either the lazy dask reduction or a direct pyarrow read depending on `method` arg
     def get_padding_length(self, field: str, method: Literal["dask", "pyarrow"] = "dask") -> int:
         if not hasattr(self, "_padding_lengths"):
             self._padding_lengths = {}
@@ -237,11 +246,9 @@ class Ingestor:
         column = NestedArrayIndexer.get_nested_field(self.array, field, self.SEPARATOR)
         column = self._ensure_2d(column)
 
-        # the way I set the padding length calc seems not to be actually compatible with dask!
-        # the issue might be in the fact that I get a scalar object, the first attempt at fixing is below
-        # def _get_length() -> int:
-        #     return int(ak.max(ak.ravel(ak.num(column, axis=1))))
-        # this however, had a potentially very expensive compute TODO - see if there's a better way
+        # ak.max/ak.ravel/ak.num on a lazy dak.Array may return either an already-materialized scalar 
+        # or a still-lazy object, depending on the reduction path taken; only call .compute() if 
+        # the result still needs it.
         def _get_length() -> int:
             result = ak.max(ak.ravel(ak.num(column, axis=1)))
             if hasattr(result, "compute"):
@@ -256,7 +263,7 @@ class Ingestor:
 
     # def _ensure_2d(self, column: dak.Array) -> dak.Array:
     #     """Determine whether `column` needs a singleton inner dimension added, using a
-    #     cheap *eager* sample (one partition) rather than relying on lazy `dak.Array`
+    #     cheap eager sample (one partition) rather than relying on lazy `dak.Array`
     #     indexing to raise IndexError — that behavior isn't guaranteed to match eager
     #     awkward semantics and could silently skip the reshape instead of erroring.
     #     """
@@ -269,7 +276,7 @@ class Ingestor:
     #         return ak.singletons(column, axis=0)
 
     # alternative to the function above, using dask column.ndim
-    # however, the behaviour of ndim can get weird if an unusual nested-record schema is used (allegedly, not tested)
+    # however, the behaviour of ndim can get weird if an unusual nested-record schema is used (does this concern us?)
     def _ensure_2d(self, column: dak.Array) -> dak.Array:
         """Determine whether `column` needs a singleton inner dimension added, using
         dask_awkward's typetracer metadata — a schema-only check that requires no
@@ -283,6 +290,18 @@ class Ingestor:
         """Return a shallow copy of the currently cached padding lengths.
         Used for access of the private _padding_lengths. This is not entirely 
         neccessary for functioning but a nice good-to-have
+        Returns:
+            dict[str, int]: Mapping of field name to max list length, for whichever
+                fields have had `get_padding_length` called on them so far. Empty
+                dict if none have been computed yet.
+        """
+        """Return a shallow copy of the currently cached padding lengths.
+
+        Provides read access to the private `_padding_lengths` cache. Not required
+        for the class to function, nor for the inspection of _padding_lengths,
+        but convenient for callers that want to inspect or persist what's been 
+        computed so far without having to access a private var.
+
         Returns:
             dict[str, int]: Mapping of field name to max list length, for whichever
                 fields have had `get_padding_length` called on them so far. Empty
@@ -400,8 +419,26 @@ class Ingestor:
     #         self.array._divisions = brute_force_divisions(resolve_paths(paths))
 
     def _inspect_array(self, array: dak.Array, paths: str | list[str]) -> None:
-        """Same inspect array as the one in GroupedIngestor... 
-        Fix for unrecognized internal parquet divisions
+        """Check that the input array has fields, and recover its `divisions` if
+        dask-awkward was unable to determine them from the source file(s) (e.g.
+        unrecognized internal parquet metadata).
+
+        Args:
+            array (dak.Array): Input Dask Awkward Array.
+            paths (str | list[str]): Paths to the input files. Used for error
+                messages and for divisions recovery.
+
+        Raises:
+            ValueError: If the input array does not have any fields.
+
+        Note:
+            Side effect: if `array.divisions` are all falsy, this assigns recovered
+            divisions to `self.array.divisions`. Uses fast file-level parquet
+            metadata when `npartitions` matches the file count, otherwise falls
+            back to reading per-row-group metadata directly.
+        
+        NOTE: this method will just fail if a set of .root files is the array source.
+        TODO: merge this method and commented-out _inspect_array above!
         """
         if not hasattr(array, "fields") or not array.fields:
             try:
@@ -426,12 +463,13 @@ class Ingestor:
             else:
                 logger.debug(
                     f"[{self.name}] npartitions ({n_partitions}) != file count "
-                    f"({len(resolved_paths)}); recovering divisions via map_partitions(len) "
-                    "instead, to avoid collapsing real partitions down to file boundaries."
+                    f"({len(resolved_paths)}); recovering divisions via per-file "
+                    "pyarrow row-group metadata instead, to avoid collapsing real "
+                    "partitions down to file boundaries."
                 )
                 # partition_lengths = array.map_partitions(len).compute() # <-- this causes a type error crash!
                 # self.array._divisions = tuple(np.cumsum([0] + list(partition_lengths)).tolist())
-                # attempted fix below:
+                # working fix is below:
                 partition_lengths = []
 
                 for file_path in resolved_paths:

@@ -1,16 +1,3 @@
-"""
-LightningDataModule for the grouped particle-feature pipeline. Mirrors
-PaddedDataModule's structure (setup/train_dataloader/val_dataloader, scaler
-and padding save/load), wired to GroupedIngestor/GroupedScaler/ColumnScaler and the
-explicit prep sequence (sentinel resolution -> scaling -> missing-
-column fill) established for this pipeline.
-
-Note: unlike PaddedDataModule, scaler-related settings (scaler_choice,
-scaler_save_path, scaler_load_path, scaler_use_sampling, scaler_sample_fraction,
-force_avoid_partition_sampling) live on DatasetConfig itself, not as separate
-constructor arguments here — they're dataset-dependent.
-"""
-
 import json
 import logging
 from pathlib import Path
@@ -42,6 +29,19 @@ _DATASET_REGISTRY = {
 
 
 class GroupedDataModule(L.LightningDataModule):
+    """
+    LightningDataModule for the grouped particle-feature pipeline. Mirrors
+    PaddedDataModule's structure (setup/train_dataloader/val_dataloader, scaler
+    and padding save/load), wired to GroupedIngestor/ColumnScaler and the
+    explicit prep sequence (sentinel resolution -> scaling -> missing-
+    column fill) established for this pipeline.
+
+    Note: unlike PaddedDataModule, scaler-related settings (scaler_choice,
+    scaler_save_path, scaler_load_path, scaler_use_sampling, scaler_sample_fraction,
+    force_avoid_partition_sampling) live on DatasetConfig itself, not as separate
+    constructor arguments here (since they're dataset-dependent).
+    """
+
     def __init__(
         self,
         dataset_config: dict,
@@ -144,6 +144,9 @@ class GroupedDataModule(L.LightningDataModule):
         else:
             logger.info(f"Fitting scaler ({cfg.scaler_choice}) on features...")
             self.scaler = ColumnScaler(scaler_choice=cfg.scaler_choice)
+            # if cfg.force_avoid_partition_sampling==True, it disallows the scaler-fitting sampler from  
+            # selecting sample events partition-by-partition (avoids biased/uneven per-partition sampling)
+            # however, the alternative is just a hard slice on the events
             features.array = self.scaler.apply(
                 features,
                 use_sampling=cfg.scaler_use_sampling,
@@ -182,7 +185,7 @@ class GroupedDataModule(L.LightningDataModule):
             features.set_padding_lengths(saved_layout)
             logger.info(f"Padding layout loaded: {saved_layout}")
         else:
-            logger.info("Computing padding layout (row-0-derived, per particle)...")
+            logger.info("Computing padding layout (per-particle reference field)...")
             features.compute_padding_layout()
 
             path = None

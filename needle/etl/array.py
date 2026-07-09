@@ -107,9 +107,10 @@ def brute_force_max_list_length(paths: list[str], column: str) -> int:
             file_max = pc.max(lengths).as_py()
             if file_max is not None:
                 max_len = max(max_len, file_max)
-    # except ArrowInvalid as e:
-    # debugging: swapped ArrowInvalid to ArrowExceptin and added raise after the logger
     except ArrowException as e:
+        # swapped ArrowInvalid to ArrowException and added raise after the logger
+        # this catches the broader ArrowException rather than just ArrowInvalid, since
+        # column/file read failures here aren't limited to invalid-value errors.
         logger.error(f"Could not determine max list length for column '{column}':\n{e}")
         raise
     return max_len

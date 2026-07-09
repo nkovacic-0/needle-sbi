@@ -15,18 +15,35 @@ from needle.ml.datasets.kfold import KFold
 from needle.utils.config_schema import DatasetConfig
 from needle.ml.lightning.datamodules.datamodule_utils import resolve_versioned_path
 
-# force logger to give us debug printouts for ML section
 from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("ml")
 
-# corresponds to the imports from needle.etl.normalization and maps them
+# Maps config-facing scaler names to their needle.etl.normalization classes.
 SCALER_REGISTRY = {
     "standard": StandardScaler,
     "minmax": MinMaxScaler,
 }
 
 class PaddedDataModule(L.LightningDataModule):
+    """
+    LightningDataModule for the flat/ragged (padded) pipeline. Builds Ingestor
+    instances for features/labels/weights, then in setup() runs the shared
+    prep sequence: scaler load-or-fit (load_scaler/apply_with_cache if
+    scaler_load_path is set, otherwise BaseScaler.apply()) followed by
+    padding-length load-or-fit (features.set_padding_lengths() if
+    padding_lengths_load_path is set, otherwise compute_all_padding_lengths()
+    with a sequential get_padding_length() fallback). Both scaler and padding
+    artifacts are saved via resolve_versioned_path (see datamodule_utils.py)
+    when a save path is configured, which skips re-saving if the canonical
+    file already exists (unless force_resave_padding_scaler=True).
+
+    Note: GroupedDataModule mirrors this file's structure for the grouped
+    particle-feature pipeline, swapping in GroupedIngestor/ColumnScaler and an
+    extended prep sequence (sentinel resolution -> scaling -> missing-column
+    fill) in place of the single scaler-apply step here.
+    """
+
     def __init__(
         self,
         dataset_config: dict,
@@ -45,10 +62,13 @@ class PaddedDataModule(L.LightningDataModule):
         scaler_choice: Literal["standard", "minmax"] = "standard", # this is irrelevant if scaler_load_path != None
         scaler_save_path: str | Path | None = None, # full filepath to save scalers to
         scaler_load_path: str | Path | None = None, # full filepath to load scalers from
+        # forces new saves of padding and scalers to new files, if the originally targeted file exists
         force_resave_padding_scaler: bool = False,
         scaler_use_sampling: bool = False,
         scaler_sample_fraction: float = 0.10,
-        # forces new saves of padding and scalers to new files, if the originally targeted file exists
+        # if force_avoid_partition_sampling==True, it disallows the scaler-fitting sampler from selecting 
+        # sample events partition-by-partition (avoids biased/uneven per-partition sampling)
+        # however, the alternative is just a hard slice on the events
         force_avoid_partition_sampling: bool = True, 
     ) -> None:
         super().__init__()
@@ -150,7 +170,7 @@ class PaddedDataModule(L.LightningDataModule):
             # reflects a fully-populated cache regardless of which backend/dataloader
             # gets constructed later, or in which order.
             logger.info("Computing padding lengths for all feature fields...")
-            # try using the paralel compute_all_padding_lengths, if it fails revert to serial operation get_padding_length
+            # try using the parallel compute_all_padding_lengths, if it fails revert to serial operation get_padding_length
             # where get_padding_length should have its own pyarrow fallback
             try:
                 features.compute_all_padding_lengths(features.fields)

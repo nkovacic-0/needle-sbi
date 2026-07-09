@@ -1,5 +1,5 @@
 """
-Base class for padded Datasets. Provided methods for other datasets to inherit from.
+Base class for padded Datasets. Provides methods for other datasets to inherit from.
 """
 
 import logging
@@ -40,7 +40,6 @@ class PaddedDatasetBase(Dataset, ABC):
     #     return self.features_ingestor.length
 
     def convert_ragged_ak_to_tensor(self, array: ak.Array, fields: list[str], ingestor: Ingestor) -> torch.Tensor:
-        # TODO - check that the docstring explains what is going on (I'm continuosly making code updates, but not docstring updates)
         """For per-particle (jagged) fields. Pads axis=1 to the precomputed global
         max length. Shape: (E, P, F).
 
@@ -97,7 +96,6 @@ class PaddedDatasetBase(Dataset, ABC):
         self, array: ak.Array, fields: list[str], ingestor: Ingestor, 
         reduce: Literal["stack", "product", "sum"] = "stack",
     ) -> torch.Tensor:
-        # TODO - needs its doctring checked, updated!
         """For per-event (regular, non-ragged) fields like labels/weights.
 
         Returns shape (E,) for a single field or a reduced ("product"/"sum") combination
@@ -109,9 +107,9 @@ class PaddedDatasetBase(Dataset, ABC):
         ]
         if len(columns) == 1:
             combined = columns[0]
-        # stach is intended for labels, however, this will BREAK if anything other than 1-D fields are passed to labels
-        # so, F colums/fields each of dim 1, is fine and yields (E, F)
-        # TODO - see if we want to expand this functionality, or revert to padded labels?
+        # stach is intended for labels, however, this will BREAK if anything other than 1-D 
+        # fields are passed to labels so, F colums/fields each of dim 1, is fine and yields (E, F)
+        # TODO - see if we want to expand this functionality, or enable a labels padding scheme?
         elif reduce == "stack":
             combined = np.stack(columns, axis=-1)
         elif reduce == "product":
@@ -163,54 +161,3 @@ class PaddedDatasetBase(Dataset, ABC):
             array = ak.singletons(array, axis=0)
         finally:
             return array
-
-    
-
-    # NOTE: this is dead code, which delegates/esposes the intestor padding calculation at this class level
-    # it was used by _compute_padding_lengths calls in padded dask/torch's inits, but that cal forcing has 
-    # now been moved to padded_datamodule
-    # def _compute_padding_lengths(self, fields: list[str]) -> None:
-    #     """Trigger (and cache, via Ingestor) padding-length computation for ragged fields.
-    #     Delegates to `self.features_ingestor.get_padding_length`, which owns the actual
-    #     caching — shared across any Dataset instances built from the same Ingestor
-    #     (e.g. train/val), so this only pays the real computation cost once per run.
-    #     """
-    #     for field in fields:
-    #         self.features_ingestor.get_padding_length(field)
-
-    # def _compute_padding_lengths(self, fields: list[str]) -> None:
-    # # TODO - is this actually sane? i.e. I didn't see NEEDLE pre-computng the 
-    # # padding scheme, but that is very much surprising, can it be that I missed it???
-    # # -- seems like there realy was not pre-computed padding scheme... 
-    # # this functions is now deprecated in favor of the new function above...
-    # """Precompute and cache the global padding length for each ragged field.
-
-    # Important:
-    #     Must be called once, in `__init__`, using the full un-computed
-    #     dask_awkward array (`self.features_ingestor.array`) — not a
-    #     partition-level slice. Because the result is cached per field and
-    #     reused across every partition and every worker, computing it from
-    #     a single partition would silently apply the wrong padding length
-    #     to all other partitions (risking truncation of real particles via
-    #     `clip=True`), and independently-computed values across torch
-    #     DataLoader workers could disagree entirely, producing inconsistent
-    #     tensor shapes across a batch.
-    # """
-    #     if not hasattr(self, "_padding_lengths"):
-    #         self._padding_lengths = {}
-    #     for field in fields:
-    #         if field in self._padding_lengths:
-    #             continue
-    #         column = NestedArrayIndexer.get_nested_field(
-    #             self.features_ingestor.array, field, self.features_ingestor.SEPARATOR
-    #         )
-    #         column = self.add_innermost_dimension(column)
-    #         def _get_length() -> int:
-    #             return int(ak.max(ak.ravel(ak.num(column, axis=1))))
-    #         if logger.isEnabledFor(logging.DEBUG):
-    #             length = _get_length()
-    #         else:
-    #             with warnings.catch_warnings():
-    #                 warnings.simplefilter("ignore")
-    #                 length = _get_length()
-    #         self._padding_lengths[field] = length

@@ -25,6 +25,23 @@ def resolve_versioned_path(
           is minted (bash mktemp-style) and reserved atomically, so a
           duplicate is written rather than overwriting the original.
 
+
+    Behavior:
+        - The canonical name for a given fold is `{stem}_{fold_index}{suffix}`.
+        - If that file doesn't exist yet, it is returned as-is (the first save,
+          in real runs).
+        - If it already exists and `force=False`, returns None — signaling the
+          caller to skip saving (a prior run for this fold already produced it).
+        - If it already exists and `force=True`, a new, uniquely-suffixed path
+          is minted (bash mktemp-style) and reserved atomically, so a
+          duplicate is written rather than overwriting the original.
+        
+    NOTE: 
+        Unless the upstream (whatever process is calling resolve_versioned_path)
+        is running from a point in the DAG were there's no per-fold parallelism
+        a TOCTOU race between different processes for the resolved path might
+        ensue.
+
     Args:
         base_path (str | Path): Base path, e.g. '/data/out/scaler.json'. The
             fold tag is inserted before the suffix.

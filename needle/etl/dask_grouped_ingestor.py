@@ -18,11 +18,15 @@ logger = ColorFormatter.get_logger("etl")
 class GroupedIngestor(Ingestor):
     """Ingestor variant for the grouped particle-feature pipeline.
 
-    Reuses Ingestor's format resolution, length lookup, and array inspection
-    unchanged (via inheritance) — only column resolution differs: columns
-    declared in `replacements_missing_columns` are tolerated as schema-absent
-    (never sent to the reader; warned about if actually found), while any
-    other requested-but-missing column still hard-fails, same as Ingestor.
+    Reuses Ingestor's format resolution and length lookup unchanged (via
+    inheritance). Array inspection (`_inspect_array`) is duplicated rather than
+    inherited. This is mostly done so that (expected) changes to the Ingestor
+    base class _inspect_array don't also affect the GroupedIngestor (for the time
+    being)
+    Column resolution also differs from the base class: columns declared in
+    `replacements_missing_columns` are tolerated as schema-absent (never sent
+    to the reader; warned about if actually found), while any other
+    requested-but-missing column still hard-fails, same as Ingestor.
     """
 
     def __init__(
@@ -75,10 +79,8 @@ class GroupedIngestor(Ingestor):
             case "root":
                 self.array = uproot.dask(paths, columns=columns_to_read, **reader_kwargs)
 
-        # NOTE: eager_compute_divisions breaks row groups from parquet's internal partitioning!
-        # we'll comment it out here, but this needs to be addressed
-        # also, NOTE: current _inspect_array overload for GroupedIngestor only works with single file-partitioning
-        # if it can execute pyarrow.parquet reads on files
+        # NOTE: eager_compute_divisions breaks (doesn't recognize) row groups from parquet's internal partitioning!
+        # Same situation as in the Ingestor class, we'll comment it out here, and instead rely on a rework of _inspect_array
         # self.array.eager_compute_divisions()
         # logger.debug(f"[{self.name}] after eager_compute_divisions: npartitions={self.array.npartitions}, divisions={self.array.divisions}")
 
@@ -116,20 +118,34 @@ class GroupedIngestor(Ingestor):
         )
 
     def _inspect_array(self, array: dak.Array, paths: str | list[str]) -> None:
-        """Overridden: base Ingestor's divisions fallback (brute_force_divisions)
-        assumes 1 partition == 1 file, which is WRONG whenever partitions are
-        finer than file-level (e.g. split_row_groups=True). Using it in that case
-        silently collapses real partitions down to file-count, breaking chunked
-        iteration (and, more subtly, potentially only ever reading partition 0's
-        worth of data across the whole training run).
+        """Check that the input array has fields, and recover its `divisions` if
+        dask-awkward was unable to determine them from the source file(s).
 
-        Keeps the same "does the array have fields" check as the base method, but
-        replaces the divisions-recovery fallback: only uses the file-level
-        brute-force approach when partition count genuinely matches file count;
-        otherwise recovers real per-partition lengths directly from dask's own
-        already-built partition structure, which is correct regardless of what
-        granularity partitions actually are.
+        Important:
+            As of this writing, this method's logic is IDENTICAL to the base
+            Ingestor._inspect_array(). It is intentionally duplicated here rather
+            than left inherited. This override exists as a temporary guard
+            against future changes to Ingestor._inspect_array() 
+            If you change one of these classes, check whether the other needs the
+            same change, or if the _inspect_array() duplication needs to be dropped
+
+        Args:
+            array (dak.Array): Input Dask Awkward Array.
+            paths (str | list[str]): Paths to the input files. Used for error
+                messages and for divisions recovery.
+
+        Raises:
+            ValueError: If the input array does not have any fields.
+            RuntimeError: If the number of recovered per-row-group partition
+                lengths does not match dask-awkward's reported partition count.
+
+        Note:
+            Side effect: if `array.divisions` are all falsy, this assigns recovered
+            divisions to `self.array.divisions`. Uses fast file-level parquet
+            metadata when `npartitions` matches the file count, otherwise falls
+            back to reading per-row-group metadata directly via pyarrow.
         """
+        
         if not hasattr(array, "fields") or not array.fields:
             try:
                 err_msg = (
@@ -157,8 +173,9 @@ class GroupedIngestor(Ingestor):
             else:
                 logger.debug(
                     f"[{self.name}] npartitions ({n_partitions}) != file count "
-                    f"({len(resolved_paths)}); recovering divisions via map_partitions(len) "
-                    "instead, to avoid collapsing real partitions down to file boundaries."
+                    f"({len(resolved_paths)}); recovering divisions via per-file "
+                    "pyarrow row-group metadata instead, to avoid collapsing real "
+                    "partitions down to file boundaries."
                 )
                 # partition_lengths = array.map_partitions(len).compute() # <-- this causes a type error crash!
                 # self.array._divisions = tuple(np.cumsum([0] + list(partition_lengths)).tolist())
@@ -185,20 +202,21 @@ class GroupedIngestor(Ingestor):
             logger.debug(f"[{self.name}] divisions recovered: npartitions={self.array.npartitions}")
 
     # NOTE: Overridden: base Ingestor's padding-length methods cache by raw field
-    # name, but the grouped pipeline has a differnet caching scheme. Rather than risk
+    # name, but the grouped pipeline has a different caching scheme. Rather than risk
     # the two key conventions mixing in the same self._padding_lengths dict,
     # both are overridden to fail loudly if called directly on a GroupedIngestor.
 
     def get_padding_length(self, field: str, method: Literal["dask", "pyarrow"] = "dask") -> int:
         raise NotImplementedError(
             "GroupedIngestor caches padding lengths by particle name, not raw field name. "
-            "Use compute_padding_layout() (row-0-derived, then extrapolated) instead."
+            "Use compute_padding_layout() (one reference field per particle) instead."
         )
 
     def compute_all_padding_lengths(self, fields: list[str]) -> dict[str, int]:
         raise NotImplementedError(
             "Use compute_padding_layout() instead — grouped padding is keyed by particle "
-            "name and derived from feature_columns_grouped's row 0, not an arbitrary field list."
+            "name, with one reference field derived per particle from feature_columns_grouped, "
+            "not an arbitrary field list."
         )
 
     def compute_padding_layout(self) -> dict[str, Any]:

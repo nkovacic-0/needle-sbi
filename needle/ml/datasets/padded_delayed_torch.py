@@ -26,28 +26,30 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         kfold: KFold | None = None,
         weights_combine: Literal["product", "sum"] = "product",
     ):
-        # TODO - update the docstring!
-        """This class extends the PaddedEagerDataset to support chunked iterating with Torch.
+        """Out-of-memory Dataset supporting multi-worker chunked iteration with torch.
 
-        In the parent class, the data is loaded during instantiation. Instead, this class focusses
-        on combining the __iter__ method of IterableDataset with the PaddedEagerDataset's functionality to
-        yield chunks of data. The __iter__ method still yields individual events, same as the regular
-        __getitem__ method of the parent class, but loads only discrete chunks of data to memory.
-        This is compatible with multiple workers if the Dataloader is using num_workers > 0.
+        Data is loaded lazily, partition by partition, inside __iter__ -- not during
+        __init__. Each partition is read via a PartitionQueue (io.py), which serializes
+        reads with a lock to stay safe across forked DataLoader worker processes, then
+        converted to tensors and yielded one event at a time. This is compatible with
+        multiple workers when the Dataloader uses num_workers > 0.
 
         Args:
-            features (dict[str, dak.Array]): Dictionary of dask_awkward arrays for features
-            labels (dict[str, dak.Array]): Dictionary of dask_awkward arrays for labels
-            chunk_size (int): Number of events per chunk to load into memory at once.
-            shuffle_chunks (bool): Whether to shuffle the chunks before yielding.
-            shuffle_events (bool): Whether to shuffle the events within each chunk.
+            features (Ingestor): Ingestor class instance holding the feature columns.
+            labels (Ingestor): Ingestor class instance holding the label columns.
+            weights (Ingestor): Ingestor class instance holding the weight columns.
+            shuffle_partitions (bool): Whether to shuffle partition order before iterating.
+            shuffle_events (bool): Whether to shuffle events within each partition.
             random_seed (int): Random seed for reproducibility.
-            kfold (KFold): Instance of the KFold class
+            kfold (KFold, optional): Instance of the KFold class.
+            weights_combine (Literal["product", "sum"]): Combination mode when multiple
+                weight columns are configured.
 
         Important:
-            This dataset cannot be shuffled by the Dataloader, as the chunks are loaded in sequence,
-            and shuffling it would invalidate the chunking. Instead, the shuffling is configured by
-            the arguments `shuffle_chunks` and `shuffle_events`.
+            This dataset cannot be shuffled by the Dataloader, as partitions are loaded
+            in sequence and shuffling it would invalidate the partitioning. Instead,
+            shuffling is configured via the `shuffle_partitions` and `shuffle_events`
+            arguments.
         """
         self.features_ingestor = features
         self.labels_ingestor = labels
@@ -67,38 +69,33 @@ class PaddedTorchDataset(IterableDataset, PaddedDatasetBase):
         self.labels_queue = PartitionQueue(labels.array)
         self.weights_queue = PartitionQueue(weights.array)
 
-        # moved the explicit computation force (call) to datamodule level, into setup() method
-        # self._compute_padding_lengths(self.feature_names)
-
-        # temp addition of a debug/dump
-        # padding_lengths_path = '/data/dust/user/nkovacic/NEEDLE/NEEDLE_DATA/fair_universe_data_merged_customized/padding_info_HTT_train.json'
-        # if padding_lengths_path is not None:
-        #     self.dump_padding_lengths(padding_lengths_path)
-
     def __iter__(self):
-        """Yields individual events from the dataset in after loading them in chunks.
+        """Yields individual events, loaded in per-partition chunks.
 
-        If the Dataloader is using multiple workers, each worker will process a different set of
-        chunks based on the worker ID (as determined by torch.utils.data.get_worker_info()).
+        If the Dataloader uses multiple workers, each worker processes a
+        different set of partitions (torch.utils.data.get_worker_info()).
 
         Yields:
-            tuple: A tuple (features, labels, weights) of torch Tensors
+            tuple: (features, labels, weights) of torch Tensors. features has
+                shape (P, F); labels/weights follow convert_flat_ak_to_tensor.
 
         Note:
-            Optionally, both the chunks and the events can be shuffled before yielding.
-            During regular training, it is recommended to set both to True.
+            Both partition order and events within a partition can optionally be
+            shuffled before yielding; during regular training it's recommended to
+            set both `shuffle_partitions` and `shuffle_events` to True.
 
             The splitting of the data works as follows:
-            - The dataset is split into chunks of size `chunk_size`.
-            - Each worker processes a different set of chunks based on its ID. The
-                actual chunk index can be shuffled beforehand.
-            - Within each chunk, the events are loaded into memory using the
-                `_compute_tensors` method, which pads the features and labels to the
-                maximum number of particles per event. Same as in the parent class,
-                Afterwards, the events are optionally shuffled by permuting their
-                indices. Finally, each event is yielded as a tuple of tensors
-                (features, labels) of shape (P, F).
+            - Partitions are assigned to workers based on worker ID (partition_id
+                % num_workers == worker_id). The order of assigned partitions can
+                be shuffled beforehand via `shuffle_partitions`.
+            - Each partition is loaded into memory and converted to tensors via
+                `convert_ragged_ak_to_tensor`/`convert_flat_ak_to_tensor`, which pad
+                the ragged feature fields to the global max particle count.
+            - Events within the partition are then optionally shuffled by
+                permuting their indices, and yielded one at a time as
+                (features, labels, weights).
         """
+        
         rng = np.random.default_rng(self.random_seed)
         self.worker_info = torch.utils.data.get_worker_info()
 
