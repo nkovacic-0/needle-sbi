@@ -28,7 +28,7 @@ from needle.etl.array import (
 
 from needle.utils.logging import ColorFormatter
 
-logger = ColorFormatter.get_logger("etl", level="DEBUG")
+logger = ColorFormatter.get_logger("etl")
 
 
 class Ingestor:

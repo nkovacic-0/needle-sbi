@@ -19,7 +19,6 @@ from needle.ml.lightning.datamodules.datamodule_utils import resolve_versioned_p
 from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("ml")
-logger.setLevel(logging.DEBUG) 
 
 # corresponds to the imports from needle.etl.normalization and maps them
 SCALER_REGISTRY = {

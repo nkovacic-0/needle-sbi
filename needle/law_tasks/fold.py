@@ -23,6 +23,7 @@ Features:
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 from pathlib import Path
@@ -277,11 +278,21 @@ class FoldTask(
 
     def run(self):
         torch.set_float32_matmul_precision("high")
-
+        # 0.a. configs
         model_config = self.systematic_config.model_override
         datamodule_config = self.systematic_config.datamodule_override
         dataset_config = self.systematic_config.dataset_override
         trainer_config = self.systematic_config.trainer_override
+
+        # 0.b. logger levels
+        # force logging levels, instead of chasing down what is imported where and which logger.setLevel wins...
+        logging.getLogger("etl").setLevel(logging.DEBUG if os.environ.get("NEEDLE_DEBUG") else logging.INFO)
+        logging.getLogger("ml").setLevel(logging.DEBUG if os.environ.get("NEEDLE_DEBUG") else logging.INFO)
+        print(f"Current logger levels are (excluding placeholder loggers and ones with level=='NOTSET'):")
+        print(f"\t{'LOGGER':<50}LEVEL")
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if isinstance(logger, logging.Logger) and logging.getLevelName(logger.level) != "NOTSET":
+                print(f"\t{name:.<50}{logging.getLevelName(logger.level)}")
 
         # 1. Load model
         model: lightning.LightningModule = hydra_instantiate(

@@ -8,8 +8,9 @@ import multiprocessing as mp
 import dask
 import dask_awkward as dak
 
-logger = logging.getLogger("ml")
+from needle.utils.logging import ColorFormatter
 
+logger = ColorFormatter.get_logger("ml")
 
 def load_partition(
     array: dak.Array,  # type: ignore

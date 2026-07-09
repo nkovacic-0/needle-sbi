@@ -22,7 +22,6 @@ from needle.etl.array import NestedArrayIndexer
 from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("etl")
-logger.setLevel(logging.DEBUG) 
 
 #: Nested metadata structure: ``{field → {scaler_key → {class_index → value}}}``.
 type MetaDataDict = dict[str, dict[str, dict[int, Any]]]

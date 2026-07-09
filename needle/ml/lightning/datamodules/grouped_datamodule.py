@@ -34,7 +34,6 @@ from needle.utils.config_schema import DatasetConfig
 from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("ml")
-logger.setLevel(logging.DEBUG)
 
 _DATASET_REGISTRY = {
     "dask": GroupedDaskDataset,

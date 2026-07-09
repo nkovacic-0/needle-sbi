@@ -12,7 +12,7 @@ from needle.etl.array import NestedArrayIndexer, resolve_paths, brute_force_max_
 from needle.etl.dask_ingestor import Ingestor
 from needle.utils.logging import ColorFormatter
 
-logger = ColorFormatter.get_logger("etl", level="DEBUG")
+logger = ColorFormatter.get_logger("etl")
 
 
 class GroupedIngestor(Ingestor):
