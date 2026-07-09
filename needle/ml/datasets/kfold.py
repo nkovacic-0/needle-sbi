@@ -169,7 +169,7 @@ class KFold:
 
         for pid in range(len(self.divisions) - 1):
             partition_event_start = fold_start - self.divisions[pid]  # local event index
-            partition_event_end = fold_end - self.divisions[pid + 1]
+            partition_event_end = fold_end - self.divisions[pid]  # local event index, own-partition-relative
 
             if pid == partition_id_of_fold_start:
                 if partition_event_start == 0:
@@ -179,7 +179,7 @@ class KFold:
                     drop[pid] = -partition_event_start
             elif pid == partition_id_of_fold_end:
                 if partition_event_end == 0:
-                    drop[pid] = None
+                    keep[pid] = None
                 else:
                     keep[pid] = -partition_event_end
                     drop[pid] = partition_event_end
