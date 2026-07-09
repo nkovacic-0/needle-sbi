@@ -129,7 +129,9 @@ class Ingestor:
         self.num_classes = len(self.fields)
 
         if max_number_events > 0:
+            logger.debug(f"[{self.name}] before truncation: npartitions={self.array.npartitions}, divisions={self.array.divisions}")
             self.array = self.array[0:max_number_events]
+            logger.debug(f"[{self.name}] after truncation: npartitions={self.array.npartitions}, divisions={self.array.divisions}")
 
         logger.debug(f"[{self.name}] Computing length via _get_length()...")
         self.length = self._get_length(self[self.fields[0]], paths)

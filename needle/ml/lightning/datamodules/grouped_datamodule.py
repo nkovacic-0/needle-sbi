@@ -79,6 +79,9 @@ class GroupedDataModule(L.LightningDataModule):
         self.apply_missing_column_fill = apply_missing_column_fill
         self.validate_padding_layout_flag = validate_padding_layout
 
+        logger.debug(f"[Grouped datamodule] n_folds: {n_folds}")
+        logger.debug(f"[Grouped datamodule] fold_index: {fold_index}")
+
     def setup(self, stage: str | None = None) -> None:
         cfg = self.dataset_config
 

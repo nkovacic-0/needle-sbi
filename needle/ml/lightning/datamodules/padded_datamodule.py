@@ -75,6 +75,7 @@ class PaddedDataModule(L.LightningDataModule):
         self.dataset_config = DatasetConfig(**dataset_config)
         self.batch_size = batch_size
         self.fold_index = fold_index
+
         self.n_folds = n_folds
         self.n_workers = n_workers
         self.multiprocessing_type = multiprocessing_type
@@ -94,6 +95,9 @@ class PaddedDataModule(L.LightningDataModule):
         self.scaler_use_sampling = scaler_use_sampling
         self.scaler_sample_fraction = scaler_sample_fraction
         self.force_avoid_partition_sampling = force_avoid_partition_sampling
+
+        logger.debug(f"[Padded datamodule] n_folds: {n_folds}")
+        logger.debug(f"[Padded datamodule] fold_index: {fold_index}")
 
     def setup(self, stage: str | None = None) -> None:
         features = Ingestor(
