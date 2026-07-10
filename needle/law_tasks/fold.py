@@ -102,7 +102,9 @@ class FoldTask(
                 f"est__{self.estimator}",
                 f"syst__{self.systematic}",
                 f"ensem__{self.ensemble}",
-                f"fold__{self.ensemble}",
+                # the commented out line will cause overwrites or exe stops with multiple folds looking into the same dir!
+                # f"fold__{self.ensemble}",
+                f"fold__{self.fold_index}",
             )
         )
 

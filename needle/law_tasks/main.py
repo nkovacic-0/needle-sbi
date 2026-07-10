@@ -52,22 +52,48 @@ class MainTask(HydraMixin, law.WrapperTask):
     def abs_results_path(self) -> Path:
         """Get the absolute path to the results directory.
 
-        Resolves potential conflicts between config-specified and CLI-specified paths.
-        The CLI value (`--results-path`) takes precedence if both are provided. The third way of overriding
-        the value (from the CLI) with `hydra_override="results_path=..."` is recommended in case you
-        want to that information to be stored as it will be directly injected into the hydra config.
+        Resolves the results directory using the following precedence:
+            1. If both the CLI parameter (`--results-path`) and the Hydra config's `results_path`
+            are set and differ, the CLI value takes precedence and a warning is logged noting
+            the conflict.
+            2. If only the Hydra config's `results_path` is set (CLI left at its default "runs"),
+            the config value is used.
+            3. Otherwise, the CLI parameter is used, falling back to its default "runs" resolved
+            relative to the current working directory if neither was set.
+
+        The third way of overriding the value (from the CLI) with `hydra_override="results_path=..."`
+        is recommended in case you want that information to be stored, as it will be directly
+        injected into the hydra config.
 
         Returns:
             Path: Absolute path to results directory.
         """
-        if self.results_path != "runs":
-            if self.config.results_path:
-                LogOnce(logger).warn_once(
-                    f"Conflicting value for arg `--results-path`. Config indicates '{self.config.results_path}' "
-                    f"while CLI arg is '{self.results_path}'. The CLI value takes precedence. You can also "
-                    f"set this parameter using `--hydra-overrides='results_path={self.results_path}'`."
-                )
-                return Path(self.config.results_path)
+        # NOTE: reworked the paths not to clobber result_path in config if no override is given
+        # if self.results_path != "runs":
+        #     if self.config.results_path:
+        #         LogOnce(logger).warn_once(
+        #             f"Conflicting value for arg `--results-path`. Config indicates '{self.config.results_path}' "
+        #             f"while CLI arg is '{self.results_path}'. The CLI value takes precedence. You can also "
+        #             f"set this parameter using `--hydra-overrides='results_path={self.results_path}'`."
+        #         )
+        #         return Path(self.config.results_path)
+
+        # return Path(os.path.abspath(self.results_path))
+        # TODO: talk to the team and see if we have a cleaner way of doing this the 'magic string' "runs"
+        # TODO: rework the docstring
+        cli_given = str(self.results_path) != "runs"
+        config_value = self.config.results_path
+
+        if cli_given and config_value and str(config_value) != str(self.results_path):
+            LogOnce(logger).warn_once(
+                f"Conflicting value for arg `--results-path`. Config indicates '{config_value}' "
+                f"while CLI arg is '{self.results_path}'. The CLI value takes precedence. You can also "
+                f"set this parameter using `--hydra-overrides='results_path={self.results_path}'`."
+            )
+            return Path(os.path.abspath(self.results_path))
+
+        if config_value:
+            return Path(os.path.abspath(config_value))
 
         return Path(os.path.abspath(self.results_path))
 

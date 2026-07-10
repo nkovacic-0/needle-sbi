@@ -30,7 +30,7 @@ from omegaconf import OmegaConf
 
 from needle.law_tasks.main import MainTask
 from needle.law_tasks.mixins import HydraMixin
-from needle.utils.logging import ColorFormatter
+from needle.utils.logging import ColorFormatter, LogOnce
 from needle.utils.results import (
     AggregationEdge,
     AggregationMethod,
@@ -54,6 +54,65 @@ class SnapshotTask(HydraMixin, law.Task):
         significant=False,
     )  # type: ignore
 
+    # NOTE: I believe these two functions will result in the same issues as in the main task
+    # (that being config vs cli precedence and accidental overrides)
+    # I'm putting an alternative below
+    # def requires(self):
+    #     """Ensure all training is completed by requiring MainTask.
+    #     Also caches the resolved config to the results directory for reference.
+    #     Returns:
+    #         MainTask: Root task that triggers all training.
+    #     """
+    #     cache_config_file = os.path.join(self.results_path, "config.yaml")
+    #     self.config._resolved = True
+    #     with open(cache_config_file, "w") as f:
+    #         f.write(OmegaConf.to_yaml(OmegaConf.structured(self.config), resolve=True))
+    #     return MainTask(
+    #         config_file=self.config_file,
+    #         hydra_overrides=self.hydra_overrides,
+    #         results_path=self.abs_results_path,
+    #     )
+
+    # @property
+    # def abs_results_path(self) -> Path:
+    #     """Get the absolute path to the results directory.
+    #     Uses config-specified path if available, otherwise uses the CLI parameter.
+    #     Returns:
+    #         Path: Absolute path to results directory.
+    #     """
+    #     if self.config.results_path:
+    #         self.results_path = self.config.results_path
+    #     return os.path.abspath(self.results_path)  # type: ignore
+    @property
+    def abs_results_path(self) -> Path:
+        """Get the absolute path to the results directory.
+
+        Resolves potential conflicts between config-specified and CLI-specified paths using the
+        same precedence as `MainTask.abs_results_path`: if both are set and differ, the CLI value
+        (`--results-path`) takes precedence and a warning is logged; if only the config value is
+        set, that is used; otherwise the CLI parameter (default "runs", resolved relative to the
+        current working directory) is used.
+
+        Returns:
+            Path: Absolute path to results directory.
+        """
+        # TODO: talk to the team and see if we have a cleaner way of doing this the 'magic string' "runs"
+        cli_given = str(self.results_path) != "runs"
+        config_value = self.config.results_path
+
+        if cli_given and config_value and str(config_value) != str(self.results_path):
+            LogOnce(logger).warn_once(
+                f"Conflicting value for arg `--results-path`. Config indicates '{config_value}' "
+                f"while CLI arg is '{self.results_path}'. The CLI value takes precedence. You can also "
+                f"set this parameter using `--hydra-overrides='results_path={self.results_path}'`."
+            )
+            return Path(os.path.abspath(self.results_path))
+
+        if config_value:
+            return Path(os.path.abspath(config_value))
+
+        return Path(os.path.abspath(self.results_path))
+
     def requires(self):
         """Ensure all training is completed by requiring MainTask.
 
@@ -62,7 +121,8 @@ class SnapshotTask(HydraMixin, law.Task):
         Returns:
             MainTask: Root task that triggers all training.
         """
-        cache_config_file = os.path.join(self.results_path, "config.yaml")
+        os.makedirs(self.abs_results_path, exist_ok=True)
+        cache_config_file = os.path.join(self.abs_results_path, "config.yaml")
         self.config._resolved = True
 
         with open(cache_config_file, "w") as f:
@@ -81,20 +141,6 @@ class SnapshotTask(HydraMixin, law.Task):
             Dict: Dictionary with 'dag_snapshot' file target containing the serialized DAG.
         """
         return {"dag_snapshot": law.LocalFileTarget(f"{self.abs_results_path}/dag_snapshot.json")}
-
-    @property
-    def abs_results_path(self) -> Path:
-        """Get the absolute path to the results directory.
-
-        Uses config-specified path if available, otherwise uses the CLI parameter.
-
-        Returns:
-            Path: Absolute path to results directory.
-        """
-        if self.config.results_path:
-            self.results_path = self.config.results_path
-
-        return os.path.abspath(self.results_path)  # type: ignore
 
     def run(self):
         """Traverse the DAG hierarchy and construct a snapshot with nodes and aggregation edges.
