@@ -85,3 +85,14 @@ class HydraMixin:
     @cache
     def print_config_path_once(self) -> None:
         logger.info(f"Using config from path: {self.config_file}")
+        
+    @cache
+    def print_law_config_path_once(self) -> None:
+        law_config_file = law.config.Config.instance().config_file
+        if law_config_file:
+            logger.info(f"Using law.cfg from path: {law_config_file}")
+        else:
+            logger.warning(
+                "No law.cfg found (checked $LAW_CONFIG_FILE, ./law.cfg, $LAW_HOME/config, "
+                "etc/law/config). Falling back to law's built-in defaults."
+            )

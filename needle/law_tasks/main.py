@@ -138,6 +138,9 @@ class MainTask(HydraMixin, law.WrapperTask):
         with open(cache_config_filepath, "w") as f:
             f.write(OmegaConf.to_yaml(OmegaConf.structured(self.config), resolve=True))
 
+        self.print_config_path_once()
+        self.print_law_config_path_once()
+
         return [
             EstimatorTask(
                 config_file=cache_config_filepath,
