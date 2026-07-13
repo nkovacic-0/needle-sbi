@@ -29,6 +29,8 @@ This is the extension point for post-training pipelines such as:
 - Model comparison and analysis
 - Integration with external tools
 """
+import os
+from pathlib import Path
 from functools import cached_property
 from itertools import product
 from typing import Any, Dict, NamedTuple
@@ -40,6 +42,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from needle.law_tasks.mixins import CollectOutputMixin, HydraMixin
 from needle.law_tasks.snapshot import SnapshotTask
+from needle.law_tasks.workflows import HTCondorWorkflow, LocalWorkflow, SlurmWorkflow
 from needle.utils.config_schema import DownstreamTaskConfig
 from needle.utils.config_utils import hydra_instantiate
 from needle.utils.logging import ColorFormatter
@@ -53,7 +56,8 @@ class BranchTuple(NamedTuple):
     parameters: Dict[str, Any]
 
 
-class DownstreamTask(CollectOutputMixin, HydraMixin, law.LocalWorkflow):
+# class DownstreamTask(CollectOutputMixin, HydraMixin, law.LocalWorkflow):
+class DownstreamTask(CollectOutputMixin, HydraMixin, LocalWorkflow, HTCondorWorkflow, SlurmWorkflow):
     """Task which wraps an external Task that should run after the main training was performed.
 
     The task is configured via the ``downstream_tasks`` key in the config.yaml file. Each entry
@@ -373,3 +377,11 @@ class DownstreamTask(CollectOutputMixin, HydraMixin, law.LocalWorkflow):
                 return False
 
         return True
+
+    @property
+    def abs_results_path(self) -> Path:
+        """Name HTCondorWorkflow/SlurmWorkflow expect this wraps the existing
+        downstream_results_path precedence (results_path_downstream override,
+        falling back to results_path) rather than duplicating it.
+        """
+        return Path(os.path.abspath(self.downstream_results_path))
