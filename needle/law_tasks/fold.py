@@ -286,7 +286,7 @@ class FoldTask(
         dataset_config = self.systematic_config.dataset_override
         trainer_config = self.systematic_config.trainer_override
 
-        # 0.b. logger levels
+        # 0.b. logger levels and path resolution infomessage
         # force logging levels, instead of chasing down what is imported where and which logger.setLevel wins...
         logging.getLogger("etl").setLevel(logging.DEBUG if os.environ.get("NEEDLE_DEBUG") else logging.INFO)
         logging.getLogger("ml").setLevel(logging.DEBUG if os.environ.get("NEEDLE_DEBUG") else logging.INFO)
@@ -295,6 +295,7 @@ class FoldTask(
         for name, logger in logging.Logger.manager.loggerDict.items():
             if isinstance(logger, logging.Logger) and logging.getLevelName(logger.level) != "NOTSET":
                 print(f"\t{name:.<50}{logging.getLevelName(logger.level)}")
+        logger.debug(f"[FoldTask] Running FoldTask {self.fold_index} with 'results_path' set to {self.results_path}.")
 
         # 1. Load model
         model: lightning.LightningModule = hydra_instantiate(

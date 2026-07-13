@@ -1,4 +1,5 @@
 import reprlib
+import pydantic
 from typing import Any, Literal
 
 import dask
@@ -8,12 +9,11 @@ import dask_awkward as dak
 import pyarrow.parquet as pq
 import uproot
 
-from needle.etl.array import NestedArrayIndexer, resolve_paths, brute_force_max_list_length, is_ragged
+from needle.etl.array import NestedArrayIndexer, resolve_paths, brute_force_max_list_length, is_ragged, brute_force_divisions
 from needle.etl.dask_ingestor import Ingestor
 from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("etl")
-
 
 class GroupedIngestor(Ingestor):
     """Ingestor variant for the grouped particle-feature pipeline.
@@ -28,7 +28,8 @@ class GroupedIngestor(Ingestor):
     to the reader; warned about if actually found), while any other
     requested-but-missing column still hard-fails, same as Ingestor.
     """
-
+    
+    @pydantic.validate_call
     def __init__(
         self,
         paths: str | list[str],
@@ -393,6 +394,7 @@ class GroupedIngestor(Ingestor):
             array = ak.with_field(array, column, where=tuple(field.split(self.SEPARATOR)))
 
         return array
+        
 
     def fill_missing_columns(self) -> dak.Array:
         """LAZILY synthesize every schema-missing column (declared in
