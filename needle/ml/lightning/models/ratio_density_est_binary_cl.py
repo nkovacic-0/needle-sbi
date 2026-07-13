@@ -9,7 +9,11 @@ from torchmetrics.classification import BinaryAccuracy
 
 from needle.ml.lightning.models.src.transformer_model import TransformerModel
 from needle.ml.lightning.models.src.training_configuration import custom_configure_optimizers
-from needle.ml.lightning.models.model_utils import unwrap_labels, WeightedBinaryAccuracy
+from needle.ml.lightning.models.model_utils import (
+    unwrap_labels,
+    WeightedBinaryAccuracy,
+    ExpectedCalibrationError,
+)
 
 from needle.utils.config_schema import DatasetConfig
 from needle.utils.logging import ColorFormatter
@@ -24,15 +28,30 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         dataset_config: dict | None = None,
         weighted_loss: str | None = None,
         num_features_in: int | None = None,
+        ECE_coarse_binning_bin_num: int = 10,
+        ECE_fine_binning_bin_num: int = 30,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
         # metrics form torchmetrics.classification
         self.train_acc = BinaryAccuracy()
         self.val_acc = BinaryAccuracy()
+        # custom weighted metrics
         if weighted_loss is not None:
             self.train_weighted_acc = WeightedBinaryAccuracy()
             self.val_weighted_acc = WeightedBinaryAccuracy()
+
+        # ECE: coarse + fine binning, computed once per epoch (see epoch-end hooks below)
+        if weighted_loss is not None:
+            _ece_weighted = True
+            self._ece_prefix = "weighted_"
+        else:
+            _ece_weighted = False
+            self._ece_prefix = ""
+        self.train_ece_coarse = ExpectedCalibrationError(n_bins=ECE_coarse_binning_bin_num, weighted=_ece_weighted)
+        self.val_ece_coarse   = ExpectedCalibrationError(n_bins=ECE_coarse_binning_bin_num, weighted=_ece_weighted)
+        self.train_ece_fine   = ExpectedCalibrationError(n_bins=ECE_fine_binning_bin_num, weighted=_ece_weighted)
+        self.val_ece_fine     = ExpectedCalibrationError(n_bins=ECE_fine_binning_bin_num, weighted=_ece_weighted)
 
         # validate optimizer_configs 
         _required_optimizer_keys = {"optimizer", "lr"}
@@ -160,6 +179,7 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         # this is needed in the callbacks
         self.log(f"{stage}_loss", loss, on_step=(stage == "train"), on_epoch=True, prog_bar=True)
 
+        # other metrics...
         # accuracy
         metric = self.train_acc if stage == "train" else self.val_acc
         metric.update(output, labels.int())
@@ -170,6 +190,16 @@ class RatioDensityEstimatorBinary(L.LightningModule):
             )
             weighted_metric.update(output, labels.int(), weights)
             self.log(f"{stage}_weighted_accuracy", weighted_metric.compute(), on_epoch=True)
+        # ECE
+        # accumulate only the compute/log/reset happens at epoch end (see hooks below)
+        ece_coarse = self.train_ece_coarse if stage == "train" else self.val_ece_coarse
+        ece_fine = self.train_ece_fine if stage == "train" else self.val_ece_fine
+        if self.weighted_loss is not None:
+            ece_coarse.update(output, labels, weights)
+            ece_fine.update(output, labels, weights)
+        else:
+            ece_coarse.update(output, labels)
+            ece_fine.update(output, labels)
 
         return loss
 
@@ -180,7 +210,7 @@ class RatioDensityEstimatorBinary(L.LightningModule):
     def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> None:
         return self._shared_step(batch, "val")
 
-    # reset metrics
+    # epoch start resets
     def on_validation_epoch_start(self):
         self.val_acc.reset()
         if self.weighted_loss is not None:
@@ -189,3 +219,15 @@ class RatioDensityEstimatorBinary(L.LightningModule):
         self.train_acc.reset()
         if self.weighted_loss is not None:
             self.train_weighted_acc.reset()
+
+    def on_train_epoch_end(self):
+        self.log(f"train_{self._ece_prefix}ece_coarse", self.train_ece_coarse.compute())
+        self.log(f"train_{self._ece_prefix}ece_fine", self.train_ece_fine.compute())
+        self.train_ece_coarse.reset()
+        self.train_ece_fine.reset()
+
+    def on_validation_epoch_end(self):
+        self.log(f"val_{self._ece_prefix}ece_coarse", self.val_ece_coarse.compute())
+        self.log(f"val_{self._ece_prefix}ece_fine", self.val_ece_fine.compute())
+        self.val_ece_coarse.reset()
+        self.val_ece_fine.reset()
