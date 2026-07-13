@@ -2,8 +2,11 @@ import os
 import tempfile
 from pathlib import Path
 
-from needle.utils.logging import ColorFormatter
+import torch
 
+from needle.etl.column_normalization import ColumnScaler
+
+from needle.utils.logging import ColorFormatter
 logger = ColorFormatter.get_logger("ml")
 
 
@@ -75,3 +78,40 @@ def resolve_versioned_path(
     os.close(fd)  # just reserving the name; caller does the actual write
     logger.info(f"{canonical} already exists and force=True; writing duplicate to {tmp_path}.")
     return Path(tmp_path)
+
+def labels_naming_collate_fn(batch, label_names: list[str]):
+    features, labels, weights = zip(*batch)
+    features = torch.stack(features)
+    labels = torch.stack(labels)     # (B,) if squeezed single-column, else (B, F) 
+    weights = torch.stack(weights)   # always (B,), thanks to weights_combine
+    if labels.ndim == 1:
+        labels_dict = {label_names[0]: labels}
+    else:
+        labels_dict = {name: labels[:, i] for i, name in enumerate(label_names)}
+    return features, labels_dict, weights
+
+def labels_naming_test_collate_fn(
+    batch: list[tuple],
+    label_names: list[str],
+    scaler: ColumnScaler,
+) -> tuple:
+    """Test-mode collate for GroupedDataModule when aux_feature_fields is set.
+    Batches the (features, labels, weights, aux) 4-tuples GroupedTorchDataset/
+    GroupedDaskDataset yield in that case, and reverts normalization on the aux
+    tensors using the SAME scaler cache features were scaled with — aux values
+    reach the caller restored to physical units, not scaled.
+    """
+    features, labels, weights, aux = zip(*batch)
+    features = torch.stack(features)
+    labels = torch.stack(labels)
+    weights = torch.stack(weights)
+    if labels.ndim == 1:
+        labels_dict = {label_names[0]: labels}
+    else:
+        labels_dict = {name: labels[:, i] for i, name in enumerate(label_names)}
+
+    aux_dict = {
+        field: scaler.denormalize_field(torch.stack([event[field] for event in aux]), field)
+        for field in aux[0]
+    }
+    return features, labels_dict, weights, aux_dict

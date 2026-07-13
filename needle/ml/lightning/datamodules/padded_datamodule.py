@@ -13,7 +13,10 @@ from needle.etl.normalization import MinMaxScaler, StandardScaler, load_scaler
 from needle.ml.datasets import PaddedDaskDataset, PaddedTorchDataset
 from needle.ml.datasets.kfold import KFold
 from needle.utils.config_schema import DatasetConfig
-from needle.ml.lightning.datamodules.datamodule_utils import resolve_versioned_path
+from needle.ml.lightning.datamodules.datamodule_utils import (
+    resolve_versioned_path,
+    labels_naming_collate_fn,
+)
 
 from needle.utils.logging import ColorFormatter
 
@@ -232,7 +235,7 @@ class PaddedDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=dataset.SHUFFLE_ALLOWED,
             num_workers=self.n_workers if dataset.TORCH_MULTIPROCESSING_ALLOWED else 0,
-            collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
+            collate_fn=partial(labels_naming_collate_fn, label_names=self.labels.fields),
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -263,16 +266,5 @@ class PaddedDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=dataset.SHUFFLE_ALLOWED,
             num_workers=self.n_workers if dataset.TORCH_MULTIPROCESSING_ALLOWED else 0,
-            collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
+            collate_fn=partial(labels_naming_collate_fn, label_names=self.labels.fields),
         )
-
-def padded_collate_fn(batch, label_names: list[str]):
-    features, labels, weights = zip(*batch)
-    features = torch.stack(features)
-    labels = torch.stack(labels)     # (B,) if squeezed single-column, else (B, F) 
-    weights = torch.stack(weights)   # always (B,), thanks to weights_combine
-    if labels.ndim == 1:
-        labels_dict = {label_names[0]: labels}
-    else:
-        labels_dict = {name: labels[:, i] for i, name in enumerate(label_names)}
-    return features, labels_dict, weights

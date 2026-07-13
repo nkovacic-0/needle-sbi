@@ -8,7 +8,7 @@ import awkward as ak
 import numpy as np
 import torch
 
-from needle.etl.array import NestedArrayIndexer
+from needle.etl.array import NestedArrayIndexer, is_ragged
 from needle.etl.dask_grouped_ingestor import GroupedIngestor
 from needle.ml.datasets.padded_base import PaddedDatasetBase
 from needle.utils.logging import ColorFormatter
@@ -77,7 +77,84 @@ class GroupedDatasetBase(PaddedDatasetBase):
             )
             self._grouped_debug_done = True
         return tensor
-    
+
+    def extract_aux_fields(
+        self,
+        array: ak.Array,
+        ingestor: GroupedIngestor,
+        fields: list[str],
+    ) -> dict[str, torch.Tensor]:
+        """Validation/test-only counterpart to convert_grouped_ak_to_tensor: 
+        extracts specific real columns from the same partition array, padding each 
+        to its own particle-group length instead of concatenating groups into
+        target_total (which makes per-group boundaries event-dependent and
+        ambiguous to invert). Returns SCALED values — reverting normalization
+        is the caller's job.
+ 
+        Important:
+            `array` must be the exact same eager, already-prepped partition
+            object passed to convert_grouped_ak_to_tensor for this iteration
+            step. This method never reads ingestor.array itself — deliberately,
+            to avoid any risk of it reflecting a different point in the lazy,
+            repeatedly-rebound resolve_sentinels/apply_with_cache/
+            fill_missing_columns chain than the training tensor was built from.
+ 
+        Args:
+            array (ak.Array): already-computed partition (same object handed
+                to convert_grouped_ak_to_tensor for this partition).
+            ingestor (GroupedIngestor): source of feature_columns_grouped/
+                particle layout and the cached per-particle padding lengths.
+            fields (list[str]): raw column names to extract. Every field must
+                be a REAL column (ingestor.fields) — schema-missing/filled
+                columns were never scaled and have no meaningful value to
+                extract or revert.
+ 
+        Returns:
+            dict[str, torch.Tensor]: one entry per requested field, each of
+                shape (E, length_j), length_j being that field's own
+                particle-group's padding length (NOT target_total).
+        """
+        if not fields:
+            return {}
+ 
+        unknown = [f for f in fields if f not in ingestor.fields]
+        if unknown:
+            raise ValueError(
+                f"[GroupedDatasetBase] aux_feature_fields {unknown} are not real "
+                f"columns (ingestor.fields); schema-missing/filled columns have no "
+                "meaningful scaled value to extract or revert."
+            )
+ 
+        layout = ingestor.get_all_padding_lengths()
+        if "__total__" not in layout:
+            raise RuntimeError(
+                "GroupedIngestor has no cached padding layout — call "
+                "compute_padding_layout() or set_padding_lengths() before iterating."
+            )
+ 
+        particle_keys = ingestor._resolve_particle_keys()
+        field_to_particle_pos = {
+            col: j for row in ingestor.feature_columns_grouped for j, col in enumerate(row)
+        }
+ 
+        aux_tensors: dict[str, torch.Tensor] = {}
+        for field in fields:
+            particle_key = particle_keys[field_to_particle_pos[field]]
+            length_j = layout[particle_key]["length"]
+ 
+            column = NestedArrayIndexer.get_nested_field(array, field, ingestor.SEPARATOR)
+            if not is_ragged(column):
+                column = ak.singletons(column, axis=0)
+            padded = ak.pad_none(column, axis=1, target=length_j, clip=True)
+            dense = ak.to_numpy(ak.fill_none(padded, np.nan))
+            aux_tensors[field] = torch.tensor(dense, dtype=torch.float32)
+ 
+        logger.debug(
+            f"[GroupedDatasetBase] extract_aux_fields: fields={list(aux_tensors.keys())} "
+            f"shapes={[tuple(t.shape) for t in aux_tensors.values()]}"
+        )
+        return aux_tensors
+
 
     def convert_ragged_ak_to_tensor(self, *args, **kwargs):
         raise NotImplementedError(

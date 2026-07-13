@@ -238,6 +238,18 @@ class ColumnScaler:
             restored = _MATH[self.scaler_choice]["denormalize"](column, stats)
             array = ak.with_field(array, restored, where=tuple(field.split(ingestor.SEPARATOR)))
         return array
+    
+    def denormalize_field(self, value, field: str):
+        """Revert normalization for a single field's already-scaled values,
+        given directly (e.g. a torch.Tensor pulled from a batch) rather than
+        as part of an Ingestor's dask/awkward array — unlike revert(), which
+        operates on a whole ingestor's lazy array. Uses the same cached stats
+        and math as revert()/apply(), so callers stay insulated from any
+        future change to that math.
+        """
+        if field not in self.cache:
+            raise KeyError(f"No cached stats for field '{field}'; cache has: {list(self.cache)}")
+        return _MATH[self.scaler_choice]["denormalize"](value, self.cache[field])
 
     def save(self, path: str | Path) -> None:
         if not self.cache:

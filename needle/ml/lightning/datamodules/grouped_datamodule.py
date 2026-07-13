@@ -9,14 +9,17 @@ from torch.utils.data import DataLoader
 
 from needle.etl.dask_ingestor import Ingestor
 from needle.etl.dask_grouped_ingestor import GroupedIngestor
-from needle.etl.grouped_normalization import GroupedScaler, load_grouped_scaler
+# from needle.etl.grouped_normalization import GroupedScaler, load_grouped_scaler
 from needle.etl.column_normalization import ColumnScaler, load_column_scaler
 from needle.etl.validate_grouped_dataset_config import validate_grouped_config
 from needle.ml.datasets.grouped_delayed_dask import GroupedDaskDataset
 from needle.ml.datasets.grouped_delayed_torch import GroupedTorchDataset
 from needle.ml.datasets.kfold import KFold
-from needle.ml.lightning.datamodules.datamodule_utils import resolve_versioned_path
-from needle.ml.lightning.datamodules.padded_datamodule import padded_collate_fn
+from needle.ml.lightning.datamodules.datamodule_utils import (
+    resolve_versioned_path,
+    labels_naming_collate_fn,
+    labels_naming_test_collate_fn,
+)
 from needle.utils.config_schema import DatasetConfig
 from needle.utils.logging import ColorFormatter
 
@@ -50,6 +53,8 @@ class GroupedDataModule(L.LightningDataModule):
         n_folds: int | None = None,
         n_workers: int = 0,
         multiprocessing_type: Literal["torch", "dask"] = "torch",
+        mode: Literal["train", "test"] = "train",
+        aux_feature_fields: list[str] | None = None,
         shuffle_partitions: bool = True,
         shuffle_events: bool = True,
         padding_lengths_save_path: str | Path | None = None,
@@ -63,6 +68,30 @@ class GroupedDataModule(L.LightningDataModule):
         self.dataset_config = DatasetConfig(**dataset_config)
         validate_grouped_config(self.dataset_config)
 
+        if mode not in ("train", "test"):
+            err_msg = (f"mode must be 'train' or 'test', got {mode!r}")
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        self.mode = mode
+
+        if self.mode == "test" and self.dataset_config.scaler_load_path is None:
+            err_msg = (
+                "GroupedDataModule(mode='test') requires dataset_config.scaler_load_path "
+                "to be set! Test-time features must reuse statistics fitted on the "
+                "training set, never fit fresh from the test file. Provide a path to a " 
+                "pre-fitted scaler cache dump."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        if aux_feature_fields and self.mode != "test":
+            err_msg = (
+                "'aux_feature_field's argument was set even though GroupedDataModule is"
+                "running in 'test' mode! 'aux_feature_fields' is meant only for mode='test'.")
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+        self.aux_feature_fields = aux_feature_fields
+
         self.batch_size = batch_size
         self.fold_index = fold_index
         self.n_folds = n_folds
@@ -74,6 +103,14 @@ class GroupedDataModule(L.LightningDataModule):
         self.padding_lengths_save_path = padding_lengths_save_path
         self.padding_lengths_load_path = padding_lengths_load_path
         self.force_resave_padding_scaler = force_resave_padding_scaler
+
+        if self.mode == "test" and padding_lengths_load_path is None:
+            logger.warning(
+                "mode='test' with no padding_lengths_load_path set! Padding layout will "
+                "be computed from this test file instead of reusing the training layout. "
+                "If your model is susceptible to particle ordering or maximum number of input "
+                "particles concider providing a path to a pre-computed padding cache dump."
+            )
 
         self.apply_sentinel_resolution = apply_sentinel_resolution
         self.apply_missing_column_fill = apply_missing_column_fill
@@ -101,6 +138,8 @@ class GroupedDataModule(L.LightningDataModule):
             max_number_events=cfg.max_number_events,
             name="FeaturesIngestor",
         )
+        from needle.etl.array import NestedArrayIndexer
+        
         logger.debug(f"features.fields (real columns read)={features.fields}")
         logger.debug(f"features.missing_columns={features.missing_columns}")
 
@@ -214,6 +253,11 @@ class GroupedDataModule(L.LightningDataModule):
         return _DATASET_REGISTRY[name]
 
     def train_dataloader(self) -> DataLoader:
+        if self.mode != "train":
+            err_msg = ("train_dataloader() is unavailable when mode='test'.")
+            logger.error(err_msg)
+            raise RuntimeError(err_msg)
+
         # the condition that has been commented out evaluates to false for fold_index == 0 
         # (n.b. from estimator task: List[FoldTask]: One task per fold (0 to n_folds-1))
         # and falls back to using the whole dataset, fixed with the new condition
@@ -242,7 +286,7 @@ class GroupedDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=dataset.SHUFFLE_ALLOWED,
             num_workers=self.n_workers if dataset.TORCH_MULTIPROCESSING_ALLOWED else 0,
-            collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
+            collate_fn=partial(labels_naming_collate_fn, label_names=self.labels.fields),
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -274,5 +318,33 @@ class GroupedDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=dataset.SHUFFLE_ALLOWED,
             num_workers=self.n_workers if dataset.TORCH_MULTIPROCESSING_ALLOWED else 0,
-            collate_fn=partial(padded_collate_fn, label_names=self.labels.fields),
+            collate_fn=partial(labels_naming_collate_fn, label_names=self.labels.fields),
+        )
+    
+    def test_dataloader(self) -> DataLoader:
+        if self.mode != "test":
+            raise RuntimeError("test_dataloader() is unavailable when mode='train'.")
+        # No KFold in test mode as the full test set is always used. Partition-level
+        # chunking is still used for efficient dataloading.
+        dataset = self.get_dataset(self.multiprocessing_type)(
+            self.features,
+            self.labels,
+            self.weights,
+            shuffle_partitions=self.shuffle_partitions,
+            shuffle_events=self.shuffle_events,
+            weights_combine=self.dataset_config.weights_combine,
+            kfold=None,
+            aux_feature_fields=self.aux_feature_fields,
+        )
+        collate_fn = (
+            partial(labels_naming_test_collate_fn, label_names=self.labels.fields, scaler=self.scaler)
+            if self.aux_feature_fields
+            else partial(labels_naming_collate_fn, label_names=self.labels.fields)
+        )
+        return DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=dataset.SHUFFLE_ALLOWED,
+            num_workers=self.n_workers if dataset.TORCH_MULTIPROCESSING_ALLOWED else 0,
+            collate_fn=collate_fn,
         )

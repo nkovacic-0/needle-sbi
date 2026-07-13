@@ -1,9 +1,3 @@
-"""
-Out-of-memory grouped-feature Dataset using torch multiprocessing and dask
-single-thread read-in. Mirrors PaddedTorchDataset — same PartitionQueue/
-worker-splitting/kfold logic, reusing io.py unchanged — swapping only the
-feature conversion call.
-"""
 
 import numpy as np
 import torch
@@ -37,6 +31,7 @@ class GroupedTorchDataset(IterableDataset, GroupedDatasetBase):
         random_seed: int = 42,
         kfold: KFold | None = None,
         weights_combine: Literal["product", "sum"] = "product",
+        aux_feature_fields: list[str] | None = None,
     ):
         """
         Args:
@@ -53,6 +48,13 @@ class GroupedTorchDataset(IterableDataset, GroupedDatasetBase):
             kfold (KFold, optional): Instance of the KFold class.
             weights_combine (Literal["product", "sum"]): Combination mode when
                 multiple weight columns are configured.
+            aux_feature_fields (list[str], optional): raw (real) column names to
+                additionally extract per event, in SCALED space, alongside the
+                usual (features, labels, weights) — see
+                GroupedDatasetBase.extract_aux_fields. Validation/test-only;
+                None (default) leaves __iter__'s yield shape exactly as before
+                this option existed.
+
 
         Important:
             This dataset cannot be shuffled by the Dataloader, as chunks are
@@ -73,6 +75,7 @@ class GroupedTorchDataset(IterableDataset, GroupedDatasetBase):
         self.labels_names = labels.fields
         self.weights_names = weights.fields
         self.weights_combine = weights_combine
+        self.aux_feature_fields = aux_feature_fields
 
         self.features_queue = PartitionQueue(features.array)
         self.labels_queue = PartitionQueue(labels.array)
@@ -94,9 +97,14 @@ class GroupedTorchDataset(IterableDataset, GroupedDatasetBase):
         different set of partitions (torch.utils.data.get_worker_info()).
 
         Yields:
-            tuple: (features, labels, weights) of torch Tensors. features has
-                shape (particle_max, n_features); labels/weights are unchanged
-                from the flat/ragged pipeline (see convert_flat_ak_to_tensor).
+            tuple: (features, labels, weights) of torch Tensors, or
+                (features, labels, weights, aux) if aux_feature_fields was set —
+                aux is a dict[str, torch.Tensor] of per-event, still-scaled
+                auxiliary values (see GroupedDatasetBase.extract_aux_fields).
+                features has shape (particle_max, n_features), labels/weights
+                are unchanged from the padded pipeline (see
+                convert_flat_ak_to_tensor).
+
         """
         rng = np.random.default_rng(self.random_seed)
         self.worker_info = torch.utils.data.get_worker_info()
@@ -125,10 +133,26 @@ class GroupedTorchDataset(IterableDataset, GroupedDatasetBase):
             labels_partition = self.labels_queue.load_partition_thread_safe(partition_id, slicing_index)
             weights_partition = self.weights_queue.load_partition_thread_safe(partition_id, slicing_index)
 
-            features_tensor = self.convert_grouped_ak_to_tensor(
-                features_partition.compute(),
-                self.features_ingestor,
-            )
+            if self.aux_feature_fields:
+                features_array = features_partition.compute()
+                features_tensor = self.convert_grouped_ak_to_tensor(
+                    features_array,
+                    self.features_ingestor,
+                )
+                aux_tensors = self.extract_aux_fields(
+                    features_array, self.features_ingestor, self.aux_feature_fields
+                )
+                # only held for the extraction above, not the yield loop below
+                # this fork does have a greater memory footprint, but it is intended
+                # to be used only on test/downstream tasks
+                del features_array  
+            else:
+                features_tensor = self.convert_grouped_ak_to_tensor(
+                    features_partition.compute(),
+                    self.features_ingestor,
+                )
+                aux_tensors = {}
+
             labels_tensor = self.convert_flat_ak_to_tensor(
                 labels_partition.compute(),
                 self.labels_names,
@@ -152,5 +176,14 @@ class GroupedTorchDataset(IterableDataset, GroupedDatasetBase):
             if self.shuffle_events:
                 event_indices = rng.permutation(event_indices)
 
-            for event_idx in event_indices:
-                yield (features_tensor[event_idx], labels_tensor[event_idx], weights_tensor[event_idx])
+            if self.aux_feature_fields:
+                for event_idx in event_indices:
+                    yield (
+                        features_tensor[event_idx],
+                        labels_tensor[event_idx],
+                        weights_tensor[event_idx],
+                        {name: t[event_idx] for name, t in aux_tensors.items()},
+                    )
+            else:
+                for event_idx in event_indices:
+                    yield (features_tensor[event_idx], labels_tensor[event_idx], weights_tensor[event_idx])
