@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import difflib
 import graphlib
 import inspect
+from enum import Enum
 from pathlib import Path
 from typing import Any, List, Literal, Mapping, Optional, Type, cast
 
@@ -20,6 +22,72 @@ from needle.utils.logging import ColorFormatter
 
 logger = ColorFormatter.get_logger("config")
 OmegaConf.register_new_resolver("if", lambda cond, t, f: t if cond else f)
+
+
+
+
+
+class ConfigStrictness(Enum):
+    IGNORE = "IGNORE"
+    WARN = "WARN"
+    RAISE = "RAISE"
+
+def cache_and_compare_config(
+    config: "MainConfig",
+    cache_config_filepath: Path,
+    strict_config: str,
+) -> None:
+    """Compare a resolved config against a previously cached version and (re)write the cache.
+
+    Centralizes the config-caching/consistency logic previously duplicated between MainTask
+    and SnapshotTask. Any task that is the actual bootstrap point of a run (currently only
+    MainTask) should call this once before constructing its subtasks.
+
+    Args:
+        config (MainConfig): The freshly resolved config for this run.
+        cache_config_filepath (Path): Path to the cached config.yaml (typically
+            `<results_path>/config.yaml`).
+        strict_config (str): One of ConfigStrictness's member names (case-insensitive).
+            Controls how a detected mismatch against the cached version is handled.
+
+    Raises:
+        RuntimeError: If strict_config == "RAISE" and the resolved config differs from the
+            cached version.
+        ValueError: If strict_config is not a recognized ConfigStrictness value.
+    """
+    if cache_config_filepath.exists():
+        cached_config = initialize_hydra_config(
+            cache_config_filepath.parent._str,
+            cache_config_filepath.stem,
+        )
+        config_diff = compare_configs(config, cached_config)
+
+        if config_diff:
+            msg = (
+                "The cached version of your config does not match the new instance. Training results "
+                "might differ based on the changes lines. Use `--remove-output` to delete the cached files "
+                f"from the previous run if you want a fresh run. Offending entries are (new, old):\n{config_diff}"
+            )
+            match strict_config.upper():
+                case ConfigStrictness.WARN.value:
+                    logger.warning(msg)
+                case ConfigStrictness.RAISE.value:
+                    logger.error(msg)
+                    raise RuntimeError(msg)
+                case ConfigStrictness.IGNORE.value:
+                    pass
+                case _:
+                    raise ValueError(
+                        f"Unknown value {strict_config} for Parameter 'strict_config'. Must "
+                        f"be one of {ConfigStrictness._member_names_}"
+                    )
+
+    with open(cache_config_filepath, "w") as f:
+        f.write(OmegaConf.to_yaml(OmegaConf.structured(config), resolve=True))
+
+
+
+
 
 
 def validate_graph(self: "MainConfig") -> None:

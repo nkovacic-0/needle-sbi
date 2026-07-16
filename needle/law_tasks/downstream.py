@@ -221,7 +221,13 @@ class DownstreamTask(CollectOutputMixin, HydraMixin, LocalWorkflow, HTCondorWork
             config_file=self.config_file,
             hydra_overrides=self.hydra_overrides,
         )
-        return snapshot.output()["dag_snapshot"].path  # type: ignore
+        path = snapshot.output()["dag_snapshot"].path
+        logger.debug(
+            f"[snapshot_path] pid={os.getpid()} id(self)={id(self)} results_path_param={self.results_path} "
+            f"resolved_path={path} exists={Path(path).exists()}"
+        )
+        return path  # type: ignore
+
 
     @property
     def downstream_results_path(self) -> str:
@@ -295,6 +301,7 @@ class DownstreamTask(CollectOutputMixin, HydraMixin, LocalWorkflow, HTCondorWork
             targets[branch_id] = law_output
 
         return law.TargetCollection(targets)
+      
 
     def input(self):
         """Convert the wrapped task's input from Luigi to Law format.
@@ -357,11 +364,8 @@ class DownstreamTask(CollectOutputMixin, HydraMixin, LocalWorkflow, HTCondorWork
                 **branch_args,
             }
         )
+        return hydra_instantiate( merged_args, snapshot_path=self.snapshot_path, )
 
-        return hydra_instantiate(
-            merged_args,
-            snapshot_path=self.snapshot_path,
-        )
 
     def run(self) -> None:
         if self.is_workflow():
@@ -369,7 +373,12 @@ class DownstreamTask(CollectOutputMixin, HydraMixin, LocalWorkflow, HTCondorWork
         else:
             self.downstream_task(branch_id=self.branch).run()
 
+
     def workflow_complete(self) -> bool:  # type: ignore
+        logger.debug(
+            f"[workflow_complete] pid={os.getpid()} snapshot_path={self.snapshot_path} "
+            f"snapshot_exists={Path(self.snapshot_path).exists()} branches={list(self.branch_map.keys())}"
+        )
         for branch_id in self.branch_map.keys():
             task = self.downstream_task(branch_id)
 
@@ -385,3 +394,22 @@ class DownstreamTask(CollectOutputMixin, HydraMixin, LocalWorkflow, HTCondorWork
         falling back to results_path) rather than duplicating it.
         """
         return Path(os.path.abspath(self.downstream_results_path))
+
+
+    def workflow_requires(self):
+        reqs = super().workflow_requires()
+        if not self.downstream_config.requires:
+            reqs["snapshot"] = SnapshotTask(
+                results_path=self.results_path,
+                config_file=self.config_file,
+                hydra_overrides=self.hydra_overrides,
+            )
+        else:
+            for downstream_dep in self.downstream_config.requires:
+                reqs[downstream_dep] = DownstreamTask(
+                    results_path=self.downstream_results_path,
+                    downstream=downstream_dep,
+                    config_file=self.config_file,
+                    hydra_overrides=self.hydra_overrides,
+                )
+        return reqs

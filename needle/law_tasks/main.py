@@ -8,7 +8,9 @@ from omegaconf import OmegaConf
 
 from needle.law_tasks.estimator import EstimatorTask
 from needle.law_tasks.mixins import HydraMixin
-from needle.utils.config_utils import compare_configs, initialize_hydra_config
+# cache_and_compare_config change... TODO: test, discuss
+# from needle.utils.config_utils import compare_configs, initialize_hydra_config
+from needle.utils.config_utils import ConfigStrictness, cache_and_compare_config
 from needle.utils.logging import ColorFormatter, LogOnce
 
 logger = ColorFormatter.get_logger("dag")
@@ -105,38 +107,52 @@ class MainTask(HydraMixin, law.WrapperTask):
         Returns:
             List[EstimatorTask]: Tasks for each estimator key in the config.
         """
+        # cache_and_compare_config change... TODO: test, discuss
+        # os.makedirs(self.abs_results_path, exist_ok=True)
+        # cache_config_filepath = Path(os.path.join(self.abs_results_path, "config.yaml"))
+        # self.config._resolved = True
+
+        # if cache_config_filepath.exists():
+        #     cached_config = initialize_hydra_config(
+        #         cache_config_filepath.parent._str,
+        #         cache_config_filepath.stem,
+        #     )
+        #     config_diff = compare_configs(self.config, cached_config)
+
+        #     if config_diff:
+        #         msg = (
+        #             "The cached version of your config does not match the new instance. Training results "
+        #             "might differ based on the changes lines. Use `--remove-output` to delete the cached files "
+        #             f"from the previous run if you want a fresh run. Offending entries are (new, old):\n{config_diff}"
+        #         )
+        #         match self.strict_config.upper():
+        #             case ConfigStrictness.WARN.value:
+        #                 logger.warning(msg)
+        #             case ConfigStrictness.RAISE.value:
+        #                 raise RuntimeError(msg)
+        #             case ConfigStrictness.IGNORE.value:
+        #                 pass
+        #             case _:
+        #                 raise ValueError(
+        #                     f"Unknown value {self.strict_config} for Parameter 'strict_config'. Must "
+        #                     f"be one of {ConfigStrictness._member_names_}"
+        #                 )
+        #
+        # with open(cache_config_filepath, "w") as f:
+        #     f.write(OmegaConf.to_yaml(OmegaConf.structured(self.config), resolve=True))
+        #
+        # self.print_config_path_once()
+        # self.print_law_config_path_once()
+
         os.makedirs(self.abs_results_path, exist_ok=True)
         cache_config_filepath = Path(os.path.join(self.abs_results_path, "config.yaml"))
         self.config._resolved = True
 
-        if cache_config_filepath.exists():
-            cached_config = initialize_hydra_config(
-                cache_config_filepath.parent._str,
-                cache_config_filepath.stem,
-            )
-            config_diff = compare_configs(self.config, cached_config)
-
-            if config_diff:
-                msg = (
-                    "The cached version of your config does not match the new instance. Training results "
-                    "might differ based on the changes lines. Use `--remove-output` to delete the cached files "
-                    f"from the previous run if you want a fresh run. Offending entries are (new, old):\n{config_diff}"
-                )
-                match self.strict_config.upper():
-                    case ConfigStrictness.WARN.value:
-                        logger.warning(msg)
-                    case ConfigStrictness.RAISE.value:
-                        raise RuntimeError(msg)
-                    case ConfigStrictness.IGNORE.value:
-                        pass
-                    case _:
-                        raise ValueError(
-                            f"Unknown value {self.strict_config} for Parameter 'strict_config'. Must "
-                            f"be one of {ConfigStrictness._member_names_}"
-                        )
-
-        with open(cache_config_filepath, "w") as f:
-            f.write(OmegaConf.to_yaml(OmegaConf.structured(self.config), resolve=True))
+        cache_and_compare_config(
+            config=self.config,
+            cache_config_filepath=cache_config_filepath,
+            strict_config=self.strict_config,
+        )
 
         self.print_config_path_once()
         self.print_law_config_path_once()

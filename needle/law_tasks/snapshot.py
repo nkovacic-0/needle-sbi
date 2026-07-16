@@ -121,12 +121,13 @@ class SnapshotTask(HydraMixin, law.Task):
         Returns:
             MainTask: Root task that triggers all training.
         """
-        os.makedirs(self.abs_results_path, exist_ok=True)
-        cache_config_file = os.path.join(self.abs_results_path, "config.yaml")
-        self.config._resolved = True
+        # cache_and_compare_config change... TODO: test, discuss
+        # os.makedirs(self.abs_results_path, exist_ok=True)
+        # cache_config_file = os.path.join(self.abs_results_path, "config.yaml")
+        # self.config._resolved = True
 
-        with open(cache_config_file, "w") as f:
-            f.write(OmegaConf.to_yaml(OmegaConf.structured(self.config), resolve=True))
+        # with open(cache_config_file, "w") as f:
+        #     f.write(OmegaConf.to_yaml(OmegaConf.structured(self.config), resolve=True))
 
         return MainTask(
             config_file=self.config_file,
@@ -155,6 +156,7 @@ class SnapshotTask(HydraMixin, law.Task):
         The DAG hierarchy traversed is:
             MainTask → EstimatorTask → SystematicTask → EnsembleTask → FoldTask
         """
+        logger.debug(f"[SnapshotTask.run] START pid={os.getpid()} output_path={self.output()['dag_snapshot'].path}")
         self.print_config_path_once()
 
         nodes: Dict[str, ModelNodeMetadata] = {}
@@ -296,7 +298,7 @@ class SnapshotTask(HydraMixin, law.Task):
             config_snapshot=OmegaConf.to_container(self.config, resolve=True),
             root_node="root",
         )
-
+        logger.debug(f"[SnapshotTask.run] DONE pid={os.getpid()} wrote {self.output()['dag_snapshot'].path}")
         snapshot.to_json(self.output()["dag_snapshot"].path)  # type: ignore
         logger.info(f"DAG snapshot saved to {self.output()['dag_snapshot'].path}")
 

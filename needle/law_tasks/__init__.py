@@ -36,6 +36,7 @@ from .fold import FoldTask
 from .main import MainTask
 from .snapshot import SnapshotTask
 from .systematic import SystematicTask
+from .full_task import FullTask
 
 __all__ = [
     "MainTask",
@@ -45,4 +46,5 @@ __all__ = [
     "FoldTask",
     "SnapshotTask",
     "DownstreamTask",
+    "FullTask",
 ]
