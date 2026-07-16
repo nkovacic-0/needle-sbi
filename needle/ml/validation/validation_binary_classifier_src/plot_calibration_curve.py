@@ -1,4 +1,6 @@
 
+from typing import  List
+
 import numpy as np
 import torch
 import mplhep as hep
@@ -45,9 +47,15 @@ class CalibrationCurveBase(PlottingWrapper):
         weights_class_0: torch.Tensor,
         weights_class_1: torch.Tensor,
         rlabel: str = "",
+        formats: List[str] | None = None,
         plotting_configs: dict | None = None,
     ) -> None:
-        super().__init__(plot_save_dir=plot_save_dir, rlabel=rlabel, plotting_configs=plotting_configs)
+        super().__init__(
+            plot_save_dir=plot_save_dir, 
+            rlabel=rlabel, 
+            formats = formats,
+            plotting_configs=plotting_configs
+        )
 
         self.scores_class_0 = scores_class_0.detach().cpu().numpy()
         self.scores_class_1 = scores_class_1.detach().cpu().numpy()
@@ -231,6 +239,7 @@ class CalibrationCurvePlotsPriorCorrected(CalibrationCurveBase):
         weights_class_0: torch.Tensor,
         weights_class_1: torch.Tensor,
         rlabel: str = "FAIR Universe HiggsML",
+        formats: List[str] | None = None,
         plotting_configs: dict | None = None,
     ) -> None:
         super().__init__(
@@ -240,6 +249,7 @@ class CalibrationCurvePlotsPriorCorrected(CalibrationCurveBase):
             weights_class_0=weights_class_0,
             weights_class_1=weights_class_1,
             rlabel=rlabel,
+            formats=formats,
             plotting_configs=plotting_configs,
         )
 

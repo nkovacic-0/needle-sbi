@@ -1,6 +1,7 @@
 import os
 import json
 import tempfile
+import traceback
 from datetime import datetime
 
 import torch
@@ -40,7 +41,6 @@ class BinaryClassifierValidation:
             'nominal':          os.path.join(self.results_savepath, "Plots"),
             'prior_corrected':  os.path.join(self.results_savepath, "Plots_with_prior_corrected")
         }
-        
 
         scores = self.model_result["model_predictions"]
         if torch.isnan(scores).any():
@@ -77,11 +77,14 @@ class BinaryClassifierValidation:
 
         self.dataset_labels = self.validation_settings.get("dataset_labels", {"class_0": "Class 0", "class_1": "Class 1"})
         self.rlabel = self.validation_settings.get("rlabel", "")
+        self.formats = self.validation_settings.get("formats", None)
 
         self.metrics: dict[str, float] = {}
         self.validation_process_success: dict[str, bool] = {}
+        self.error_messages: dict[str, str] = {}
 
     def compute(self) -> dict:
+        compute_failure = False
         os.makedirs(self.results_savepath, exist_ok=True)
 
         requested_checks = self.validation_settings.get("make_validation_checks", {})
@@ -133,10 +136,13 @@ class BinaryClassifierValidation:
                         self.metrics[flat_key] = value
 
             except Exception:
+                error_text = traceback.format_exc()
                 logger.exception(
                     f"[BinaryClassifierValidation] '{registry_key}' failed for node_id={self.node_id}"
                 )
                 self.validation_process_success[registry_key] = False
+                compute_failure = True
+                self.error_messages[registry_key] = error_text
                 if expect_outputs:
                     self.metrics[registry_key] = float("nan")
 
@@ -151,7 +157,7 @@ class BinaryClassifierValidation:
         logger.info(f"[BinaryClassifierValidation] Wrote results for node_id={self.node_id} to {output_path}")
 
 
-        return results_dict
+        return self.error_messages, compute_failure
 
 
     def _kwargs_for_scalar_metric(self, use_corrected: bool, current_configs: dict) -> dict:
@@ -179,6 +185,7 @@ class BinaryClassifierValidation:
             "class_0_dataset_label": self.dataset_labels.get("class_0", "Class 0"),
             "class_1_dataset_label": self.dataset_labels.get("class_1", "Class 1"),
             "rlabel": self.rlabel,
+            "formats": self.formats,
             "plotting_configs": current_configs,
         }
 
@@ -196,6 +203,7 @@ class BinaryClassifierValidation:
             "weights_class_0": self.weights_class_0,
             "weights_class_1": self.weights_class_1,
             "rlabel": self.rlabel,
+            "formats": self.formats,
             "plotting_configs": current_configs,
         }
 
@@ -244,6 +252,7 @@ class BinaryClassifierValidation:
                 "dataset_source_label": dataset_source_label,
                 "dataset_target_label": dataset_target_label,
                 "rlabel": self.rlabel,
+                "formats": self.formats,
                 "plotting_configs": direction_configs,
             }
 

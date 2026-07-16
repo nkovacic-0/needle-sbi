@@ -1,4 +1,4 @@
-
+import numpy as np
 import torch
 
 from needle.ml.lightning.models.model_utils import unwrap_labels
@@ -9,6 +9,7 @@ logger = ColorFormatter.get_logger("downstream-validation")
 def collect_predictions(
     model_chunk: list[dict],
     dataloader,
+    total_batches: int | None = None,
 ) -> tuple[list[dict], torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
     """Single streaming pass over `dataloader`, evaluating every model in
     `model_chunk` against each batch as it streams by. This amortizes the test
@@ -19,6 +20,8 @@ def collect_predictions(
             "model" must already be .eval()'d and on its target device.
         dataloader: yields (features, labels, weights) or
             (features, labels, weights, aux) batches.
+        total_batches: if known, enables a better progress log every 10% progress
+            towards finishing the evaluations, otherwise every 1000 batches are reported
 
     Returns:
         chunk_results: [{"model_path": ..., "results_savepath": ..., "model_predictions": Tensor}, ...],
@@ -46,9 +49,24 @@ def collect_predictions(
     aux_chunks: dict[str, list[torch.Tensor]] = {}
 
     n_batches = 0
+    batch_interval_reporting = 1000
+    last_reported_decile = 0  
     with torch.no_grad():
         for batch in dataloader:
             n_batches += 1
+
+            if total_batches is not None:
+                current_decile = min(n_batches * 10 // total_batches, 10)
+                if current_decile > last_reported_decile:
+                    last_reported_decile = current_decile
+                    logger.info(
+                        f"[collect_predictions] Processed {n_batches}/{total_batches} batches "
+                        f"({100 * n_batches / total_batches:.1f}%)"
+                    )
+            else:
+                if n_batches % batch_interval_reporting == 0:
+                    logger.info(f"[collect_predictions] Processed {n_batches} batch(es)...")
+
             features, labels, weights, *aux = batch
             aux = aux[0] if aux else {}
 
@@ -222,3 +240,63 @@ def compute_probability_ratio(score: torch.Tensor, epsilon: float = 1e-5) -> tor
     """
     score_clamped = torch.clamp(score, min=epsilon, max=1.0 - epsilon)
     return (1.0 - score_clamped) / score_clamped
+
+
+def weighted_bin_statistics(
+    values: np.ndarray,
+    weights: np.ndarray,
+    bin_edges: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-bin weighted mean, weighted standard deviation, and total weight of
+    `values`, for len(bin_edges)-1 bins. Companion to
+    weighted_histogram_with_error -- that computes per-bin COUNTS/density;
+    this computes per-bin POSITION (the weighted mean and spread of the
+    values actually landing in each bin), needed when a bin's plotted
+    x-position should reflect where its events truly sit rather than an
+    assumed bin-center.
+
+    - A bin whose NET total weight is <= 0 is discarded entirely. 
+      A warning fires naming how many bins this happened to.
+    - A bin will still be kept (net weight > 0) while containing a MIX of
+      positive- and negative-weight events. 
+
+    Args:
+        values: (N,) raw, unbinned values (e.g. raw model scores).
+        weights: (N,) corresponding event weights, can be signed.
+        bin_edges: (n_bins + 1,) monotonically increasing bin edges.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: (weighted_mean,
+            weighted_std, total_weight), each shape (n_bins,). mean/std are
+            NaN for any discarded bin; total_weight never is.
+    """
+    n_bins = len(bin_edges) - 1
+    bin_idx = np.clip(np.digitize(values, bin_edges[1:-1], right=False), 0, n_bins - 1)
+
+    bin_weight = np.zeros(n_bins)
+    bin_weighted_value = np.zeros(n_bins)
+    bin_weighted_sq_value = np.zeros(n_bins)
+    np.add.at(bin_weight, bin_idx, weights)
+    np.add.at(bin_weighted_value, bin_idx, weights * values)
+    np.add.at(bin_weighted_sq_value, bin_idx, weights * values ** 2)
+
+    kept = bin_weight > 0
+    negative = bin_weight < 0
+    n_negative = int(negative.sum())
+    if n_negative > 0:
+        logger.warning(
+            f"[weighted_bin_statistics] {n_negative}/{n_bins} bin(s) have a negative NET "
+            "total weight and were discarded from mean/std calculation - weighted mean/std "
+            "for those bins are NaN. total_weight is returned as-is (not NaN'd) for all bins."
+        )
+
+    mean = np.full(n_bins, np.nan)
+    std = np.full(n_bins, np.nan)
+
+    mean[kept] = bin_weighted_value[kept] / bin_weight[kept]
+    variance = np.zeros(n_bins)
+    variance[kept] = bin_weighted_sq_value[kept] / bin_weight[kept] - mean[kept] ** 2
+    variance = np.clip(variance, a_min=0.0, a_max=None)
+    std[kept] = np.sqrt(variance[kept])
+
+    return mean, std, bin_weight

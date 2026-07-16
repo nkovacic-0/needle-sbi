@@ -1,3 +1,6 @@
+
+from typing import  List
+
 import numpy as np
 import torch
 import mplhep as hep
@@ -39,11 +42,21 @@ class ReweightingPlots(PlottingWrapper):
                 labels_axis_fontsize: styling, same meaning as elsewhere.
             y_lim_for_residue (tuple[float, float], default (0.0, 2.0)):
                 ratio-subplot y-limits.
-            yscale (str, default "log"): main histogram panel scale.
-            legend_loc (str, default "best").
+            yscale (str | list[str], default "log"): main histogram panel scale, passed
+                directly to matplotlib's set_yscale (any valid value works, e.g.
+                "linear"/"log"/"symlog", an invalid string raises there, not silently
+                ignored). A list produces one figure per entry, filename suffixed with
+                "_{yscale}"; a single str produces one figure, filename unchanged.
             colors (list[str], default ["black", "orangered", "dodgerblue"]):
                 target / source-raw / source-reweighted, in order.
             display_quantile (float, default 1.0): see weighted_mode_region_bounds.
+            add_additional_ratio_hlines (bool, default False): extra faint guide
+                lines in the ratio panel, at regular intervals, in addition to the
+                always-drawn ratio=1.0 reference line.
+            ratio_hline_range (tuple[float, float, float], default derived from
+                y_lim_for_residue as (y_min, y_max, 0.25) if not set): start/stop/step
+                for the extra guide lines. 1.0 itself is always skipped (already
+                drawn as the primary reference line).
     """
 
     def __init__(
@@ -57,9 +70,15 @@ class ReweightingPlots(PlottingWrapper):
         dataset_source_label: str = "Source",
         dataset_target_label: str = "Target",
         rlabel: str = "",
+        formats: List[str] | None = None,
         plotting_configs: dict | None = None,
     ) -> None:
-        super().__init__(plot_save_dir=plot_save_dir, rlabel=rlabel, plotting_configs=plotting_configs)
+        super().__init__(
+            plot_save_dir=plot_save_dir, 
+            rlabel=rlabel,
+            formats = formats,
+            plotting_configs=plotting_configs,
+        )
 
         if not features_source or not features_target:
             err_msg = "ReweightingPlots requires at least one entry in BOTH features_source and features_target"
@@ -141,6 +160,23 @@ class ReweightingPlots(PlottingWrapper):
         legend_loc = cfg.get("legend_loc", "best")
         colors = cfg.get("colors", ["black", "orangered", "dodgerblue"])
         display_quantile = cfg.get("display_quantile", 1.0)
+        add_additional_ratio_hlines = cfg.get("add_additional_ratio_hlines", False)
+        ratio_hline_range = cfg.get("ratio_hline_range")
+        if ratio_hline_range is None:
+            ratio_hline_range = (y_lim_for_residue[0], y_lim_for_residue[1], 0.25)
+
+        # yscale: str -> one figure per feature, filename UNCHANGED (backward
+        # compatible with existing configs). list[str] -> one figure per
+        # feature PER entry, filename gets a "_{yscale}" suffix. Suffixing is
+        # decided by TYPE alone, not list length -- even a single-entry list
+        # gets suffixed.
+        yscale_config = cfg.get("yscale", "log")
+        if isinstance(yscale_config, str):
+            yscale_options = [yscale_config]
+            suffix_yscale_in_filename = False
+        else:
+            yscale_options = list(yscale_config)
+            suffix_yscale_in_filename = True
 
         results = []
         for key, pair in self.features_by_column.items():
@@ -200,47 +236,57 @@ class ReweightingPlots(PlottingWrapper):
                 epsilon=epsilon,
             )
 
+            # EMD is independent of yscale (rendering-only) we compute it once per
+            # feature, and reuse across every yscale variant below.
             emd_before = weighted_wasserstein_distance(bin_centers, hist_source_raw, hist_target)
             emd_after = weighted_wasserstein_distance(bin_centers, hist_source_reweighted, hist_target)
             self.emd_results[key] = {"emd_before": emd_before, "emd_after": emd_after, "feature_label": pretty_label}
 
-            fig, (ax_hist, ax_ratio) = plt.subplots(
-                nrows=2, figsize=figure_size, sharex=True,
-                gridspec_kw={"height_ratios": [3, 1]},
-            )
+            for yscale in yscale_options:
+                fig, (ax_hist, ax_ratio) = plt.subplots(
+                    nrows=2, figsize=figure_size, sharex=True,
+                    gridspec_kw={"height_ratios": [3, 1]},
+                )
 
-            hep.histplot(
-                hist_target, bin_edges, yerr=np.sqrt(sq_err_target),
-                label=self.dataset_target_label, linewidth=linewidth, color=colors[0], ax=ax_hist
-            )
-            hep.histplot(
-                hist_source_raw, bin_edges, yerr=np.sqrt(sq_err_source_raw),
-                label=f"{self.dataset_source_label} (raw)", linewidth=linewidth, color=colors[1], ax=ax_hist
-            )
-            hep.histplot(
-                hist_source_reweighted, bin_edges, yerr=np.sqrt(sq_err_source_reweighted),
-                label=f"{self.dataset_source_label} (reweighted)", linewidth=linewidth, color=colors[2], ax=ax_hist
-            )
+                hep.histplot(
+                    hist_target, bin_edges, yerr=np.sqrt(sq_err_target),
+                    label=self.dataset_target_label, linewidth=linewidth, color=colors[0], ax=ax_hist
+                )
+                hep.histplot(
+                    hist_source_raw, bin_edges, yerr=np.sqrt(sq_err_source_raw),
+                    label=f"{self.dataset_source_label} (raw)", linewidth=linewidth, color=colors[1], ax=ax_hist
+                )
+                hep.histplot(
+                    hist_source_reweighted, bin_edges, yerr=np.sqrt(sq_err_source_reweighted),
+                    label=f"{self.dataset_source_label} (reweighted)", linewidth=linewidth, color=colors[2], ax=ax_hist
+                )
 
-            ax_hist.set_ylabel("Normalized events", fontsize=labels_axis_fontsize)
-            ax_hist.legend(loc=legend_loc, fontsize=labels_axis_fontsize)
-            if yscale == "log":
-                ax_hist.set_yscale("log")
-            ax_hist.set_title(f"Reweighting of {pretty_label}", fontsize=title_fontsize)
+                ax_hist.set_ylabel("Normalized events", fontsize=labels_axis_fontsize)
+                ax_hist.legend(loc=legend_loc, fontsize=labels_axis_fontsize)
+                ax_hist.set_yscale(yscale)  # forwarded directly, see class docstring
+                ax_hist.set_title(f"Reweighting of {pretty_label}", fontsize=title_fontsize)
 
-            hep.histplot(ratio_raw, bin_edges, yerr=ratio_raw_err, label="Raw ratio", linewidth=linewidth, color=colors[1], ax=ax_ratio)
-            hep.histplot(ratio_reweighted, bin_edges, yerr=ratio_reweighted_err, label="Reweighted ratio", linewidth=linewidth, color=colors[2], ax=ax_ratio)
-            ax_ratio.axhline(1.0, color="black", linewidth=auxiliary_linewidth)
-            ax_ratio.set_ylim(*y_lim_for_residue)
-            ax_ratio.set_xlim(x_min, x_max)
-            ax_ratio.set_xlabel(pretty_label, fontsize=labels_axis_fontsize)
-            ax_ratio.set_ylabel(f"Ratio to\n{self.dataset_target_label}", fontsize=labels_axis_fontsize, loc="center")
-            ax_ratio.legend(loc=legend_loc, fontsize=int(0.85 * labels_axis_fontsize))
+                hep.histplot(ratio_raw, bin_edges, yerr=ratio_raw_err, label="Raw ratio", linewidth=linewidth, color=colors[1], ax=ax_ratio)
+                hep.histplot(ratio_reweighted, bin_edges, yerr=ratio_reweighted_err, label="Reweighted ratio", linewidth=linewidth, color=colors[2], ax=ax_ratio)
+                ax_ratio.axhline(1.0, color="black", linewidth=auxiliary_linewidth)
+                if add_additional_ratio_hlines:
+                    start, stop, step = ratio_hline_range
+                    for y_loc in np.arange(start, stop + step / 2, step):
+                        if y_loc == 1.0:
+                            continue  # already drawn above, avoid double-drawing
+                        ax_ratio.axhline(y_loc, color="black", linewidth=auxiliary_linewidth / 2, alpha=0.5, linestyle='--') 
+                ax_ratio.set_ylim(*y_lim_for_residue)
+                ax_ratio.set_xlim(x_min, x_max)
+                ax_ratio.set_xlabel(pretty_label, fontsize=labels_axis_fontsize)
+                ax_ratio.set_ylabel(f"Ratio to\n{self.dataset_target_label}", fontsize=labels_axis_fontsize, loc="center")
+                ax_ratio.legend(loc=legend_loc, fontsize=int(0.85 * labels_axis_fontsize))
 
-            fig = self.set_needle_plot_style(fig, axes=[ax_hist])
-            fig.tight_layout()
-            filename = self._resolve_plot_filename(f"reweighting_{key}")
-            results.append((filename, fig))
+                fig = self.set_needle_plot_style(fig, axes=[ax_hist])
+                fig.tight_layout()
+
+                base_name = f"reweighting_{key}_{yscale}" if suffix_yscale_in_filename else f"reweighting_{key}"
+                filename = self._resolve_plot_filename(base_name)
+                results.append((filename, fig))
 
         logger.debug(f"[ReweightingPlots] Built {len(results)} reweighting plot(s): {[name for name, _ in results]}")
         return results

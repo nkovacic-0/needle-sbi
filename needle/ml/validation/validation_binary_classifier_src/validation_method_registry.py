@@ -22,6 +22,10 @@ from needle.ml.validation.validation_binary_classifier_src.plot_calibration_curv
     CalibrationCurvePlotsHEP,
     CalibrationCurvePlotsPriorCorrected,
 )
+from needle.ml.validation.validation_binary_classifier_src.plot_reliability_diagram import (
+    ReliabilityDiagramHEP,
+    ReliabilityDiagramPriorCorrected,
+)
 from needle.ml.validation.validation_utils.plotting_wrapper import PlottingWrapper
 from needle.ml.validation.validation_binary_classifier_src.plot_scores_ratios import ScoreRatioPlots
 from needle.ml.validation.validation_binary_classifier_src.plot_reweighting import ReweightingPlots
@@ -215,6 +219,18 @@ VALIDATION_METHOD_REGISTRY = {
     },
     "calibration_curve_prior_corrected": {
         "function_call": partial(_adapter_plotting_function, plotting_class=CalibrationCurvePlotsPriorCorrected),
+        "use_corrected_scores": True,
+        "expect_outputs": False,
+        "input_shape": "calibration_curve",
+    },
+    "reliability_diagram": {
+        "function_call": partial(_adapter_plotting_function, plotting_class=ReliabilityDiagramHEP),
+        "use_corrected_scores": False,
+        "expect_outputs": False,
+        "input_shape": "calibration_curve",  # same kwargs shape as CalibrationCurvePlotsHEP/PriorCorrected
+    },
+    "reliability_diagram_prior_corrected": {
+        "function_call": partial(_adapter_plotting_function, plotting_class=ReliabilityDiagramPriorCorrected),
         "use_corrected_scores": True,
         "expect_outputs": False,
         "input_shape": "calibration_curve",

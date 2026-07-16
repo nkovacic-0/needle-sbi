@@ -1,3 +1,6 @@
+
+from typing import  List
+
 import numpy as np
 import torch
 
@@ -51,9 +54,15 @@ class ScoreRatioPlots(PlottingWrapper):
         class_0_dataset_label: str = "Class 0",
         class_1_dataset_label: str = "Class 1",
         rlabel: str = "",
+        formats: List[str] | None = None,
         plotting_configs: dict | None = None,
     ) -> None:
-        super().__init__(plot_save_dir=plot_save_dir, rlabel=rlabel, plotting_configs=plotting_configs)
+        super().__init__(
+            plot_save_dir=plot_save_dir, 
+            rlabel=rlabel,
+            formats = formats,
+            plotting_configs=plotting_configs,
+        )
 
         self.scores_class_0 = scores_class_0.detach().cpu().numpy()
         self.scores_class_1 = scores_class_1.detach().cpu().numpy()

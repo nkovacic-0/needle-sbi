@@ -31,15 +31,18 @@ class PlottingWrapper:
          methods deriving the same filename), so this hard-fails immediately;
       3. styles (if requested) and saves every figure, once confirmed clean.
     """
+    formats: List[str] = ["pdf", "png"]
 
     def __init__(
         self,
         plot_save_dir: str,
         rlabel: str = "FAIR Universe HiggsML",
+        formats: List[str] | None = None,
         plotting_configs: dict | None = None,
     ) -> None:
         self.plot_save_dir = plot_save_dir
         self.rlabel = rlabel
+        self.formats = formats if formats is not None else self.PlottingSettings.formats
         self.plotting_configs = dict(plotting_configs) if plotting_configs else {}
         os.makedirs(os.path.abspath(self.plot_save_dir), exist_ok=True)
 
@@ -177,7 +180,7 @@ class PlottingWrapper:
         figures: Dict[str, Figure] = {}
         for filename, fig, add_style, _ in all_results:
             fig = self.set_needle_plot_style(fig) if add_style else fig
-            for fmt in self.PlottingSettings.formats:
+            for fmt in self.formats:
                 save_path = os.path.join(self.plot_save_dir, f"{filename}.{fmt}")
                 fig.savefig(save_path)
                 logger.debug(f"[PlottingWrapper] Saved plot '{filename}' to '{save_path}'.")

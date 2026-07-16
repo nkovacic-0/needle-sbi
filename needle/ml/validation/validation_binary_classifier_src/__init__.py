@@ -17,8 +17,15 @@ from needle.ml.validation.validation_binary_classifier_src.plot_calibration_curv
     CalibrationCurvePlotsHEP,
     CalibrationCurvePlotsPriorCorrected,
 )
+from needle.ml.validation.validation_binary_classifier_src.plot_reliability_diagram import (
+    ReliabilityDiagramHEP,
+    ReliabilityDiagramPriorCorrected,
+)
 from needle.ml.validation.validation_binary_classifier_src.plot_scores_ratios import ScoreRatioPlots
 from needle.ml.validation.validation_binary_classifier_src.plot_reweighting import ReweightingPlots
+
+from needle.ml.validation.validation_binary_classifier_src.model_validation_utils import correct_prior_shift
+
 
 __all__ = [
     # ece wariants
@@ -39,4 +46,8 @@ __all__ = [
     "CalibrationCurvePlotsPriorCorrected",
     "ScoreRatioPlots",
     "ReweightingPlots",
+    "ReliabilityDiagramHEP",
+    "ReliabilityDiagramPriorCorrected",
+    # helper 
+    "correct_prior_shift",
 ]

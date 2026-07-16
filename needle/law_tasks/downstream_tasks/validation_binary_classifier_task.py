@@ -1,6 +1,7 @@
 import os
 import json
 from pathlib import Path
+from collections import defaultdict
 from functools import cached_property
 
 import hydra
@@ -10,6 +11,7 @@ from needle.utils.config_utils import hydra_instantiate
 import luigi
 from luigi.freezing import recursively_unfreeze
 
+import math
 import torch
 
 import torch.multiprocessing
@@ -36,7 +38,7 @@ def get_model_class(name: str):
     return _LOADABLE_MODELS[name]
 
 
-class ValidationTestsBinaryClassifier(luigi.Task):
+class ValidationTestsBinaryClassifierTask(luigi.Task):
     """Hub for NN final-quality validation on a binary classifier's held-out
     test set. Registered as an ordinary downstream_tasks entry (_target_);
     snapshot_path is injected automatically by DownstreamTask.
@@ -73,16 +75,25 @@ class ValidationTestsBinaryClassifier(luigi.Task):
         description="Validation-run tuning knobs; validation_settings is passed through to the metric-computation step.",
     )
 
+    @cached_property
+    def snapshot(self) -> dict:
+        exists = Path(self.snapshot_path).exists()
+        logger.debug(f"[snapshot] pid={os.getpid()} id(self)={id(self)} snapshot_path={self.snapshot_path} exists={exists}")
+        if not exists:
+            return {"nodes": {}}
+        with open(self.snapshot_path) as f:
+            return json.load(f)
+
     def output(self):
+        if not Path(self.snapshot_path).exists():
+            # Never return an empty dict here: law's remote-workflow branch-readiness check
+            # treats zero required targets as vacuously satisfied and will skip job submission
+            # entirely. A single always-missing sentinel keeps this branch correctly "not ready".
+            return {"__snapshot_pending__": luigi.LocalTarget(f"{self.snapshot_path}.pending")}
         return {
             node_id: luigi.LocalTarget(f"{self._results_savepath(node_id)}/_SUCCESS")
             for node_id in self.fold_node_ids
         }
-
-    @cached_property
-    def snapshot(self) -> dict:
-        with open(self.snapshot_path) as f:
-            return json.load(f)
 
     @cached_property
     def validation_settings(self) -> dict:
@@ -166,7 +177,12 @@ class ValidationTestsBinaryClassifier(luigi.Task):
         return model.to(device).eval().to(torch.float32)
 
     def _results_savepath(self, node_id: str) -> str:
-        return f"{self.output_path}/{self._safe_filename(node_id)}"
+        base = f"{self.output_path}/{self._safe_filename(node_id)}"
+        if self.validation_settings.get("determine_outputdir_by_test_set_size", False):
+            max_number_events = self.dataset_config.get("max_number_events", -1)
+            size_label = "full" if max_number_events is None or max_number_events <= 0 else str(max_number_events)
+            base = f"{base}/{size_label}_sized_testset"
+        return base
 
     @cached_property
     def model_manifest(self) -> list[dict]:
@@ -180,11 +196,22 @@ class ValidationTestsBinaryClassifier(luigi.Task):
             for node_id in self.fold_node_ids
         ]
         if not manifest:
-            logger.warning(
+            available_estimator_names = sorted({
+                node["estimator_name"]
+                for node in self.snapshot["nodes"].values()
+                if node["task_type"] == "fold"
+            })
+            err_msg = (
                 f"[ValidationTestsBinaryClassifier.model_manifest] No fold nodes matched "
-                f"estimator_names={list(self.estimator_names)} in the snapshot -- validation will "
-                f"run zero chunks. Check estimator_names and snapshot_path for a misconfiguration."
+                f"estimator_names={list(self.estimator_names)} in the snapshot at '{self.snapshot_path}'. "
+                "This is a config error, not a valid 'nothing to validate' state! This is a raise, "
+                "because if it is left as a warning, it would silently report success with zero results! "
+                "(an empty output() is vacuously 'complete' to Luigi/LAW, so run() never gets called and "
+                "nothing looks wrong!)"
+                f"/n/tEstimator names actually present in this snapshot: {available_estimator_names}."
             )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
         else:
             logger.info(f"[ValidationTestsBinaryClassifier.model_manifest] {len(manifest)} fold(s) to validate for estimator_names={list(self.estimator_names)}")
         logger.debug(f"[ValidationTestsBinaryClassifier.model_manifest] node_ids: {[entry['node_id'] for entry in manifest]}")
@@ -208,7 +235,7 @@ class ValidationTestsBinaryClassifier(luigi.Task):
         n_dropped = int(nan_mask.sum())
         if n_dropped > 0:
             logger.warning(
-                f"[run] Dropping {n_dropped}/{n_events} event(s) with NaN in labels/weights "
+                f"[ValidationTestsBinaryClassifier.run] Dropping {n_dropped}/{n_events} event(s) with NaN in labels/weights "
                 "(this is a dataset issue, not a model issue). Those events are excluded from "
                 "validation for every model in this run."
             )
@@ -220,17 +247,49 @@ class ValidationTestsBinaryClassifier(luigi.Task):
 
         return self._clean_labels, self._clean_weights, self._clean_aux_features
 
+    def _log_and_raise_accumulated_validation_errors(self, accumulated_errors: list[tuple[str, str, str]]) -> None:
+        """accumulated_errors: list of (node_id, registry_key, error_text).
+        Groups by EXACT error_text (deduplicating identical tracebacks so the 
+        final dump doesn't repeat the same traceback once per occurrence.
+        """
+        by_text: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        for node_id, registry_key, error_text in accumulated_errors:
+            by_text[error_text].append((node_id, registry_key))
+
+        n_nodes = len({node_id for node_id, _, _ in accumulated_errors})
+        logger.error(
+            f"[ValidationTestsBinaryClassifier.run] Validation had {len(accumulated_errors)} failing "
+            f"check(s) across {n_nodes} node(s), {len(by_text)} unique error(s):"
+        )
+        for error_text, occurrences in by_text.items():
+            logger.error(
+                f"\n\n\n[ValidationTestsBinaryClassifier.run] The following error occurred "
+                f"{len(occurrences)} time(s), for (node_id, registry_key): {occurrences}\n{error_text}"
+            )
+
+        raise RuntimeError(
+            f"[ValidationTestsBinaryClassifier.run] Validation had {len(accumulated_errors)} failing "
+            f"check(s) across {n_nodes} node(s) ({len(by_text)} unique error(s)). See preceding log "
+            "entries for full error tracebacks."
+        )
+
     def run(self):
+        logger.debug(
+            f"[ValidationTestsBinaryClassifier.run] ENTERED. snapshot_path={self.snapshot_path}, "
+            f"output_path={self.output_path}, estimator_names={list(self.estimator_names)}"
+        )
         requested_checks = self.validation_settings.get("make_validation_checks", {})
         logger.debug(f"[ValidationTestsBinaryClassifier] requested_checks status: {requested_checks}")
 
         self.datamodule.setup()
         dataloader = self.datamodule.test_dataloader()
+        total_batches = math.ceil(self.datamodule.features.length / self.datamodule.batch_size)
         targets = self.output()
 
         manifest = self.model_manifest
         chunk_size = self.validation_configs["NN_model_validation_chunk_size"]
         n_chunks = (len(manifest) + chunk_size - 1) // chunk_size
+        accumulated_validation_errors: list[tuple[str, str, str]] = []
 
         for chunk_idx, start in enumerate(range(0, len(manifest), chunk_size), start=1):
             chunk = [
@@ -238,11 +297,11 @@ class ValidationTestsBinaryClassifier(luigi.Task):
                 for entry in manifest[start : start + chunk_size]
             ]
             logger.info(
-                f"[run] Running model chunk {chunk_idx}/{n_chunks}:"
+                f"[ValidationTestsBinaryClassifier.run] Running model chunk {chunk_idx}/{n_chunks}:"
                 f"\n\t{[entry['node_id'] for entry in chunk]}"
             )
 
-            chunk_results, labels, weights, aux_features = collect_predictions(chunk, dataloader)
+            chunk_results, labels, weights, aux_features = collect_predictions(chunk, dataloader, total_batches=total_batches)
 
             clean_labels, clean_weights, clean_aux_features = self._get_clean_shared_arrays(labels, weights, aux_features)
             del labels, weights, aux_features
@@ -260,15 +319,14 @@ class ValidationTestsBinaryClassifier(luigi.Task):
                     "class_1": weights_class_1.sum().item(),
                     "class_0": weights_class_0.sum().item(),
                 }
-                logger.info(f"[run] Real (unnormalized) per-class weight sums: {self._real_class_weight_sums}")
+                logger.info(f"[ValidationTestsBinaryClassifier.run] Real (unnormalized) per-class weight sums: {self._real_class_weight_sums}")
 
             for i, (entry, result) in enumerate(zip(chunk, chunk_results), start=1):
                 logger.info(
-                    f"[run] Validating model {i}/{len(chunk)} in chunk {chunk_idx}/{n_chunks}: "
+                    f"[ValidationTestsBinaryClassifier.run] Validating model {i}/{len(chunk)} in chunk {chunk_idx}/{n_chunks}: "
                     f"node_id={entry['node_id']}"
                 )
-
-                BinaryClassifierValidation(
+                validation_error_messages, validation_compute_failure = BinaryClassifierValidation(
                     validation_settings=self.validation_settings,
                     real_class_weight_sums=self._real_class_weight_sums,
                     node_id=entry["node_id"],
@@ -279,12 +337,27 @@ class ValidationTestsBinaryClassifier(luigi.Task):
                     results_savepath=result["results_savepath"],
                 ).compute()
 
-                with targets[entry["node_id"]].open("w") as f:
-                    json.dump({"status": "predictions_ready", "node_id": entry["node_id"]}, f)
-                logger.debug(f"[run] Wrote _SUCCESS for node_id={entry['node_id']}")
+
+                if validation_compute_failure:
+                    logger.error(
+                        f"[ValidationTestsBinaryClassifier.run] One or more validation checks failed "
+                        f"for node_id={entry['node_id']}. Continuing with remaining models, will raise "
+                        "once all have been attempted."
+                    )
+                    for registry_key, error_text in validation_error_messages.items():
+                        accumulated_validation_errors.append((entry["node_id"], registry_key, error_text))
+                else:
+                    with targets[entry["node_id"]].open("w") as f:
+                        json.dump({"status": "predictions_ready", "node_id": entry["node_id"]}, f)
+                    logger.debug(
+                        f"[ValidationTestsBinaryClassifier.run] Wrote _SUCCESS for node_id={entry['node_id']}"
+                    )
 
             del chunk, chunk_results
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        logger.info(f"[run] Validation complete: {len(manifest)} fold(s) across {n_chunks} chunk(s).")
+        if accumulated_validation_errors:
+            self._log_and_raise_accumulated_validation_errors(accumulated_validation_errors)
+
+        logger.info(f"[ValidationTestsBinaryClassifier.run] Validation complete: {len(manifest)} fold(s) across {n_chunks} chunk(s).")
